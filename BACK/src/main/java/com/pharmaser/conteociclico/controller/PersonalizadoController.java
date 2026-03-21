@@ -15,7 +15,10 @@ public class PersonalizadoController {
     private PersonalizadoService personalizadoService;
 
     @GetMapping
-    public List<Personalizado> getAll() {
+    public List<Personalizado> getAll(@RequestParam(required = false) Integer idUsuario) {
+        if (idUsuario != null) {
+            return personalizadoService.getPersonalizadosByUsuario(idUsuario);
+        }
         return personalizadoService.getAllPersonalizados();
     }
 

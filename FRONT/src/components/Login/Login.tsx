@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { User, Lock, ArrowRight, ShieldCheck, Mail } from 'lucide-react';
 import { login } from '../../servicios/authServices';
 import logoph from "../../assets/inner.png";
-import sistemas from "../../assets/SISTEMA_DE_GESTION_TIC_enhanced.webp";
+import sistemas from "../../assets/SISTEMA_DE_GESTION_TIC_enhanced.jpg";
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
@@ -10,118 +12,159 @@ const Login = () => {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
 
     try {
-      const user = await login(username, password); // Llamada a la función login del servicio authServices
-      console.log('Login.tsx: Backend returned user:', user);
-
+      const user = await login(username, password);
       if (user && user.roles) {
-        console.log('Login.tsx: Navigating to /inicio');
         navigate('/inicio');
       } else {
-        console.error('Login.tsx: Missing user.roles', user);
         Swal.fire({
           icon: 'error',
-          title: 'Error',
+          title: '¡Oops!',
           text: 'Error en la estructura del usuario.',
+          background: '#fff',
+          confirmButtonColor: '#f6952c'
         });
       }
     } catch (err) {
-      console.error('Error durante el login:', err);
       Swal.fire({
         icon: 'error',
-        title: 'Usuario o contraseña incorrectos',
-        text: 'Por favor, verifica tus credenciales.',
+        title: 'Acceso Denegado',
+        text: 'Usuario o contraseña incorrectos. Por favor intenta de nuevo.',
+        background: '#fff',
+        confirmButtonColor: '#f6952c'
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-      <div className="container mx-auto max-w-5xl">
-        <div className="bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col lg:flex-row relative">
+    <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4 relative overflow-hidden font-sans">
+      {/* Elementos Decorativos de Fondo */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-100 rounded-full blur-[120px] opacity-60"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-50 rounded-full blur-[120px] opacity-60"></div>
 
-          {/* Formulario (Izquierda) */}
-          <div className="w-full lg:w-1/2 p-8 lg:p-12 flex flex-col justify-center">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="container mx-auto max-w-5xl z-10"
+      >
+        <div className="bg-white/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl shadow-gray-200/50 overflow-hidden flex flex-col lg:flex-row border border-white">
 
-            <div className="lg:hidden text-center mb-8">
-              <img src={logoph} alt="Logo" className="max-w-[100px] inline-block h-auto" />
-            </div>
-
-            <h2 className="text-3xl font-bold mb-4 text-gray-800">Iniciar Sesión</h2>
-            <h4 className="text-lg font-bold mb-2 text-gray-700">Accede a tu cuenta</h4>
-            <p className="text-gray-500 text-sm mb-8">
-              Bienvenido de vuelta a <strong className="font-semibold text-gray-700">nuestro sistema</strong>
-            </p>
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <input
-                  type="text"
-                  className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-orange-500 focus:bg-white focus:ring-2 focus:ring-orange-200 outline-none transition-all"
-                  placeholder="Usuario"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <input
-                  type="password"
-                  className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-orange-500 focus:bg-white focus:ring-2 focus:ring-orange-200 outline-none transition-all"
-                  placeholder="Contraseña"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-3 rounded-lg font-semibold text-white transition-colors duration-200 hover:bg-orange-600"
-                style={{ backgroundColor: '#f6952c' }}
+          {/* Sección Izquierda: Formulario */}
+          <div className="w-full lg:w-[45%] p-8 lg:p-14 flex flex-col justify-between bg-white/50">
+            <div>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.2 }}
+                className="mb-10"
               >
-                Iniciar Sesión
-              </button>
-            </form>
+                <img src={logoph} alt="Logo" className="h-12 w-auto object-contain" />
+              </motion.div>
 
-            <div className="relative my-8 text-center bg-transparent">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200"></div>
+              <div className="mb-10">
+                <h2 className="text-4xl font-black text-gray-900 mb-3 tracking-tight">Bienvenido</h2>
+                <p className="text-gray-500 font-medium">Ingresa tus credenciales para continuar al sistema.</p>
               </div>
-              <span className="relative px-4 bg-white text-sm text-gray-500">
-                o
-              </span>
+
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-bold text-gray-700 ml-1">Usuario</label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400 group-focus-within:text-orange-500 transition-colors">
+                      <User size={20} />
+                    </div>
+                    <input
+                      type="text"
+                      className="w-full pl-11 pr-4 py-4 rounded-2xl bg-gray-50/50 border-2 border-transparent focus:border-orange-400 focus:bg-white outline-none transition-all font-medium text-gray-700 placeholder:text-gray-400"
+                      placeholder="nombre_usuario"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-bold text-gray-700 ml-1">Contraseña</label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400 group-focus-within:text-orange-500 transition-colors">
+                      <Lock size={20} />
+                    </div>
+                    <input
+                      type="password"
+                      className="w-full pl-11 pr-4 py-4 rounded-2xl bg-gray-50/50 border-2 border-transparent focus:border-orange-400 focus:bg-white outline-none transition-all font-medium text-gray-700 placeholder:text-gray-400"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-4 rounded-2xl font-bold text-white shadow-lg shadow-orange-200 bg-gradient-to-r from-orange-400 to-orange-500 hover:from-orange-500 hover:to-orange-600 transition-all flex items-center justify-center gap-2 group disabled:opacity-70"
+                >
+                  {isLoading ? (
+                    <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  ) : (
+                    <>
+                      Iniciar Sesión
+                      <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
+                </motion.button>
+              </form>
             </div>
 
-            <div className="text-center text-gray-400 text-xs flex flex-col items-center">
-              <span>Copyright © 2026 Todos los derechos reservados</span>
-              <span className="group relative inline-block mt-1 cursor-default opacity-70 hover:opacity-100 transition-opacity">
-                Desarrollado por R.R.R.
-                <span className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-700 text-white text-[10px] rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-300 z-50">
-                  Rafael Rojas Ramírez
-                  <svg className="absolute text-gray-700 h-2 w-full left-0 top-full" x="0px" y="0px" viewBox="0 0 255 255" xmlSpace="preserve"><polygon className="fill-current" points="0,0 127.5,127.5 255,0" /></svg>
-                </span>
-              </span>
+            <div className="mt-12 pt-8 border-t border-gray-100 flex flex-col items-center gap-4">
+              <div className="text-center text-gray-400 text-[10px] leading-relaxed">
+                <p>© Todos los derechos reservados</p>
+                <div className="group relative inline-block mt-0.5 pointer-events-auto cursor-help">
+                  <span className="hover:text-gray-600 transition-colors">Desarrollado por R.R.R.</span>
+                  <div className="invisible group-hover:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-2 p-3 bg-gray-900 text-white rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 z-50 min-w-[200px]">
+                    <p className="font-bold text-xs mb-1">Rafael Rojas Ramírez</p>
+                    <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45"></div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Logo central (Escritorio) */}
-          <div className="hidden lg:block absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
-            <div className="bg-white p-4 rounded-full shadow-lg">
-              <img src={logoph} alt="Logo" className="w-[60px] h-[60px] object-contain" />
-            </div>
-          </div>
+          {/* Sección Derecha: Visual */}
+          <div className="hidden lg:flex w-[55%] bg-gradient-to-br from-gray-50 to-orange-50/30 items-center justify-center p-12 relative overflow-hidden">
+            {/* Patrón de fondo sutil */}
+            <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 0)', backgroundSize: '24px 24px' }}></div>
 
-          {/* Imagen ilustrativa (Derecha) */}
-          <div className="w-full lg:w-1/2 bg-gray-50 hidden lg:flex items-center justify-center p-8">
-            <img src={sistemas} className="max-w-full h-auto object-contain drop-shadow-md hover:scale-105 transition-transform duration-500" alt="Sistema" />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.4, duration: 0.8 }}
+              className="relative z-10"
+            >
+              <img
+                src={sistemas}
+                className="max-w-full h-auto object-contain rounded-2xl shadow-2xl shadow-orange-900/10 transform hover:scale-[1.02] transition-transform duration-700"
+                alt="Dashboard Visual"
+              />
+
+            </motion.div>
           </div>
 
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };

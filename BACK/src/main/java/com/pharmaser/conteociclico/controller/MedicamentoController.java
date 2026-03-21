@@ -31,6 +31,12 @@ public class MedicamentoController {
         return medicamentoService.saveMedicamento(medicamento);
     }
 
+    @PutMapping("/{id}")
+    public Medicamento update(@PathVariable Integer id, @RequestBody Medicamento medicamento) {
+        medicamento.setId(id);
+        return medicamentoService.saveMedicamento(medicamento);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Integer id) {
         medicamentoService.deleteMedicamento(id);

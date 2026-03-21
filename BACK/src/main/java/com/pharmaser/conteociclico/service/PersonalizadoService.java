@@ -13,9 +13,11 @@ public class PersonalizadoService {
     @Autowired
     private PersonalizadoRepository personalizadoRepository;
 
-    public List<Personalizado> getAllPersonalizados() {
-        return personalizadoRepository.findAll();
+    public List<Personalizado> getPersonalizadosByUsuario(Integer idUsuario) {
+        return personalizadoRepository.findByIdUsuario(idUsuario);
     }
+
+    public List<Personalizado> getAllPersonalizados() {
 
     public Optional<Personalizado> getPersonalizadoById(Integer id) {
         return personalizadoRepository.findById(id);

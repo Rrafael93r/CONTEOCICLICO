@@ -7,6 +7,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
+import java.time.LocalDate;
+
 @RestController
 @RequestMapping("/api/detalle-conteo")
 public class DetalleConteoController {
@@ -15,12 +17,22 @@ public class DetalleConteoController {
     private DetalleConteoService detalleConteoService;
 
     @GetMapping
-    public List<DetalleConteo> getAll() {
+    public List<DetalleConteo> getAll(@RequestParam(required = false) Integer idUsuario, 
+                                     @RequestParam(required = false) String fecha) {
+        if (idUsuario != null && fecha != null) {
+            return detalleConteoService.getDetallesByUsuarioYFecha(idUsuario, LocalDate.parse(fecha));
+        }
         return detalleConteoService.getAllDetalles();
     }
 
     @PostMapping
     public DetalleConteo create(@RequestBody DetalleConteo detalle) {
+        return detalleConteoService.saveDetalle(detalle);
+    }
+
+    @PutMapping("/{id}")
+    public DetalleConteo update(@PathVariable Integer id, @RequestBody DetalleConteo detalle) {
+        detalle.setId(id);
         return detalleConteoService.saveDetalle(detalle);
     }
 

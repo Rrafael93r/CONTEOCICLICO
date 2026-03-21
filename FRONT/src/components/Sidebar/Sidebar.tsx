@@ -8,6 +8,9 @@ import {
   IconSettings,
   IconReportAnalytics,
   IconTruck,
+  IconChevronLeft,
+  IconChevronRight,
+  IconLogout,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -17,7 +20,8 @@ import logoph from "../../assets/inner.png";
 
 const Sidebar: React.FC = () => {
   const location = useLocation();
-  const [user, setUser] = useState({ username: "", roleId: 0 });
+  const [user, setUser] = useState({ usuario: "", roleId: 0 });
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -63,29 +67,59 @@ const Sidebar: React.FC = () => {
     .filter((section) => section.items.length > 0);
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-full flex-shrink-0 transition-all duration-300">
-      <header className="flex items-center p-4 border-b border-gray-100">
-        <img src={logoph || "/placeholder.svg"} alt="CONTEOCICLICO Logo" className="w-10 h-10 object-contain mr-3" />
-        <h2 className="hidden md:block font-semibold text-xl tracking-wide m-0 text-gray-800">CONTEOCICLICO</h2>
+    <aside className={`${isCollapsed ? "w-20" : "w-72"} bg-white border-r border-gray-100 flex flex-col h-screen sticky top-0 flex-shrink-0 transition-all duration-500 ease-in-out z-50 shadow-sm`}>
+      {/* Botón Toggle Flotante */}
+      <button
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        className="absolute -right-3 top-20 bg-white border border-gray-100 rounded-full p-1 shadow-md hover:text-orange-500 hover:border-orange-500 transition-all z-10 hidden md:block"
+      >
+        {isCollapsed ? <IconChevronRight size={16} /> : <IconChevronLeft size={16} />}
+      </button>
+
+      <header className={`flex items-center ${isCollapsed ? "justify-center" : "justify-start"} p-6 mb-2`}>
+        <img src={logoph || "/placeholder.svg"} alt="Logo" className="w-10 h-10 object-contain flex-shrink-0" />
+        {!isCollapsed && (
+          <div className="ml-3 transition-opacity duration-300 overflow-hidden whitespace-nowrap">
+            <h2 className="font-black text-lg tracking-tighter m-0 text-gray-900">PHARMASER</h2>
+            <p className="text-[9px] font-black text-orange-500 uppercase tracking-[0.2em] leading-none mt-1">Conteo Cíclico</p>
+          </div>
+        )}
       </header>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+      <div className="flex-1 flex flex-col overflow-hidden px-4">
+        <div className="flex-1 overflow-y-auto space-y-8 custom-scrollbar py-4">
           {filteredSections.map((section, index) => (
-            <div key={index}>
-              <h6 className="text-gray-400 uppercase text-xs font-bold mb-3 tracking-wider">{section.heading}</h6>
-              <ul className="space-y-1 p-0 m-0 list-none">
+            <div key={index} className="space-y-3">
+              <h6 className={`text-gray-400 uppercase text-[10px] font-black tracking-widest px-2 transition-all duration-300 ${isCollapsed ? "opacity-0 h-0" : "opacity-100"}`}>
+                {section.heading}
+              </h6>
+              <ul className="space-y-2 p-0 m-0 list-none">
                 {section.items.map((item, itemIndex) => {
                   const isActive = location.pathname === item.path;
                   return (
                     <li key={itemIndex}>
                       <Link
                         to={item.path}
-                        className={`flex items-center gap-3 py-2.5 px-3 rounded-xl text-sm font-medium transition-all duration-200 ${isActive ? "bg-orange-500 text-white shadow-md shadow-orange-200" : "text-gray-600 hover:bg-orange-50 hover:text-orange-600"}`}
+                        title={isCollapsed ? item.label : ""}
+                        className={`flex items-center ${isCollapsed ? "justify-center" : "justify-start"} gap-3 py-3 px-3 rounded-2xl text-sm font-bold transition-all duration-300 group
+                          ${isActive
+                            ? "bg-gray-900 text-white shadow-xl shadow-gray-200"
+                            : "text-gray-500 hover:bg-orange-50 hover:text-orange-600"}`}
                         style={{ textDecoration: "none" }}
                       >
-                        <item.icon size={20} stroke={isActive ? 2.5 : 2} className={isActive ? "text-white" : "text-gray-500"} />
-                        <span>{item.label}</span>
+                        <item.icon
+                          size={22}
+                          stroke={isActive ? 2.5 : 2}
+                          className={`flex-shrink-0 transition-transform duration-300 ${!isActive && "group-hover:scale-110"}`}
+                        />
+                        {!isCollapsed && (
+                          <span className="transition-opacity duration-300 whitespace-nowrap overflow-hidden">
+                            {item.label}
+                          </span>
+                        )}
+                        {isActive && !isCollapsed && (
+                          <div className="ml-auto w-1.5 h-1.5 bg-orange-500 rounded-full"></div>
+                        )}
                       </Link>
                     </li>
                   );
@@ -96,18 +130,28 @@ const Sidebar: React.FC = () => {
         </div>
       </div>
 
-      <div className="p-4 bg-white border-t border-gray-100">
-        <div className="bg-gray-50 rounded-xl p-3 flex justify-between items-center shadow-sm border border-gray-100 hover:border-orange-200 transition-colors">
+      <div className={`p-4 transition-all duration-300 ${isCollapsed ? "items-center" : "items-stretch"}`}>
+        <div className={`bg-gray-50/50 rounded-3xl p-3 flex items-center shadow-sm border border-gray-100 group transition-all duration-300 ${isCollapsed ? "justify-center" : "justify-between"}`}>
           <div className="flex items-center min-w-0">
-            <IconUser size={20} className="text-orange-500 flex-shrink-0 mr-2" />
-            <div className="ml-3 flex flex-col min-w-0">
-              <span className="font-semibold text-sm text-gray-800 truncate">{user.username || "NOMBRE USUARIO"}</span>
-              <span className="font-medium text-[10px] text-gray-500 truncate mt-0.5">{getRoleName(user.roleId) || "ROL"}</span>
+            <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-orange-500 flex-shrink-0 group-hover:bg-orange-500 group-hover:text-white transition-colors">
+              <IconUser size={20} />
             </div>
+            {!isCollapsed && (
+              <div className="ml-3 flex flex-col min-w-0 transition-opacity duration-300">
+                <span className="font-black text-xs text-gray-900 truncate uppercase">{user?.usuario || "Usuario"}</span>
+              </div>
+            )}
           </div>
-          <Link to="/login" onClick={logout} className="ml-2 flex-shrink-0 text-gray-400 hover:text-orange-500 transition-colors p-1.5 rounded-lg hover:bg-orange-50">
-            <i className="bi bi-box-arrow-right text-xl"></i>
-          </Link>
+          {!isCollapsed && (
+            <Link
+              to="/login"
+              onClick={logout}
+              className="ml-2 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+              title="Cerrar Sesión"
+            >
+              <IconLogout size={18} />
+            </Link>
+          )}
         </div>
       </div>
     </aside>

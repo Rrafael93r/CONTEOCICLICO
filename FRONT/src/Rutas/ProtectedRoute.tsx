@@ -11,12 +11,10 @@ const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
   const user = getCurrentUser()
 
   if (!user) {
-    console.error("ProtectedRoute: Redirecting to /login because user is null");
     return <Navigate to="/login" />
   }
 
   if (allowedRoles && !allowedRoles.includes(user.roleId)) {
-    console.error(`ProtectedRoute: Redirecting because roleId ${user.roleId} is not in allowedRoles [${allowedRoles.join(', ')}]`);
     // Redirección basada en rol
     if (user.roleId === 3) {
       return <Navigate to="/mi-reporte" />

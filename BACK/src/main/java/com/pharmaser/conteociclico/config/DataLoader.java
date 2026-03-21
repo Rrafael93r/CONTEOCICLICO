@@ -24,9 +24,6 @@ public class DataLoader {
                 admin.setSede("BOGOTA");
                 admin.setNumeroConteo(0);
                 usuarioRepository.save(admin);
-                System.out.println(">>> USER CREATED: admin / admin");
-            } else {
-                System.out.println(">>> admin user already exists");
             }
         };
     }

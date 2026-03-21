@@ -4,7 +4,7 @@ const API_URL = 'http://localhost:8080/api/auth/login';
 
 interface User {
   id: number;
-  username: string;
+  usuario: string;
   roles: {
     id: number;
     name: string;
@@ -15,7 +15,6 @@ export const login = async (username: string, password: string): Promise<User> =
   try {
     const response = await axios.post(API_URL, { username, password });
 
-    // El backend ahora devuelve { token: "...", user: {...} }
     const { token, user } = response.data;
 
     if (!user || !user.roles || typeof user.roles.id === 'undefined') {
@@ -24,9 +23,10 @@ export const login = async (username: string, password: string): Promise<User> =
 
     const userInfo = {
       id: user.id,
-      username: user.username,
+      usuario: user.usuario, 
       roleId: user.roles.id,
-      token: token
+      token: token,
+      numeroConteo: user.numeroConteo
     };
 
     localStorage.setItem('user', JSON.stringify(userInfo));

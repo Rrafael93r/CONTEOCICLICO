@@ -27,10 +27,10 @@ const SimpleLayout: React.FC<SimpleLayoutProps> = ({ children }) => {
                 className="w-10 h-10 object-contain"
               />
               <div className="ml-3">
-                <h5 className="m-0 font-bold text-lg text-gray-800">
-                  CONTEOCICLICO
+                <h5 className="m-0 font-black text-sm md:text-base text-gray-900 tracking-tight leading-none">
+                  CONTEO CÍCLICO
                 </h5>
-                <span className="text-sm text-gray-500">Sistema de Reportes</span>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none">Pharmaser S.A.S</span>
               </div>
             </div>
 
@@ -58,8 +58,12 @@ const SimpleLayout: React.FC<SimpleLayoutProps> = ({ children }) => {
                   <path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0"></path>
                   <path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"></path>
                 </svg>
-                <Link to="/login" onClick={logout} className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-orange-500 text-orange-500 hover:bg-orange-50 transition-colors bg-white font-medium text-sm no-underline">
-                  <i className="bi bi-box-arrow-right"></i>
+                <Link 
+                  to="/login" 
+                  onClick={logout} 
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-50 text-orange-600 hover:bg-orange-500 hover:text-white transition-all duration-300 font-black text-xs uppercase tracking-widest no-underline border-2 border-orange-100"
+                >
+                  <i className="bi bi-box-arrow-right text-lg"></i>
                   <span className="hidden sm:inline">Salir</span>
                 </Link>
               </div>

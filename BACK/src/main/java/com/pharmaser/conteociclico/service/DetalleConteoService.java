@@ -7,11 +7,17 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Optional;
 
+import java.time.LocalDate;
+
 @Service
 public class DetalleConteoService {
 
     @Autowired
     private DetalleConteoRepository detalleConteoRepository;
+
+    public List<DetalleConteo> getDetallesByUsuarioYFecha(Integer idUsuario, LocalDate fecha) {
+        return detalleConteoRepository.findByIdUsuarioAndFechaRegistro(idUsuario, fecha);
+    }
 
     public List<DetalleConteo> getAllDetalles() {
         return detalleConteoRepository.findAll();

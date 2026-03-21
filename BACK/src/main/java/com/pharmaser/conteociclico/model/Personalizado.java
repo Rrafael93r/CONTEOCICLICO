@@ -17,8 +17,16 @@ public class Personalizado {
     @Column(name = "idmedicamento")
     private Integer idMedicamento;
 
+    @ManyToOne
+    @JoinColumn(name = "idmedicamento", insertable = false, updatable = false)
+    private Medicamento medicamento;
+
     @Column(name = "idusuario")
     private Integer idUsuario;
+
+    @ManyToOne
+    @JoinColumn(name = "idusuario", insertable = false, updatable = false)
+    private Usuario usuario;
 
     @Column(name = "fecharegistro")
     private LocalDate fechaRegistro;

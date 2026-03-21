@@ -1,4 +1,6 @@
 import axios from 'axios';
+import Swal from 'sweetalert2';
+import 'sweetalert2/dist/sweetalert2.min.css';
 
 // Configurar interceptor globalmente
 axios.interceptors.request.use(
@@ -22,17 +24,23 @@ axios.interceptors.request.use(
         return Promise.reject(error);
     }
 );
-
 // Manejo global de errores (opcional, pero útil)
 axios.interceptors.response.use(
     (response) => response,
-    (error) => {
+    async (error) => {
         if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-            console.error('Interceptor detectó error 401/403 en:', error.config?.url);
-            console.error('Status:', error.response.status, 'Response:', error.response.data);
             
             // Pausar para que el usuario pueda ver el error
-            alert('Error 401/403 detectado al llamar a: ' + error.config?.url + '\n\nPresiona Aceptar para continuar al login.');
+            await Swal.fire({
+                icon: 'warning',
+                title: 'Sesión Finalizada o No Autorizado',
+                text: 'Tu sesión ha expirado o no tienes permisos para realizar esta acción. Serás redirigido al login.',
+                confirmButtonColor: '#f6952c',
+                background: '#fff',
+                customClass: {
+                    popup: 'rounded-3xl'
+                }
+            });
 
             // Token expirado o inválido
             localStorage.removeItem('token');

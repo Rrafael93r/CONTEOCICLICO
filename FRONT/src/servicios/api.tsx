@@ -1,4 +1,4 @@
-import axios from './axiosConfig';
+import axios from 'axios';
 
 const API_URL = 'http://localhost:8080/api';
 
@@ -7,72 +7,59 @@ export const getFarmacias = async () => {
     const response = await axios.get(`${API_URL}/farmacia`);
     return response.data;
   } catch (error) {
-    console.error('Error fetching farmacias:', error);
     throw error;
   }
 };
 
 export const getCiudades = async () => {
   try {
-    const response = await axios.get(`${API_URL}/ciudades`);
+    const response = await axios.get(`${API_URL}/ciudad`);
     return response.data;
   } catch (error) {
-    console.error('Error fetching ciudades:', error);
     throw error;
   }
 };
 
 export const getProveedores = async () => {
   try {
-    const response = await axios.get(`${API_URL}/proveedorinternet`);
+    const response = await axios.get(`${API_URL}/proveedor`);
     return response.data;
   } catch (error) {
-    console.error('Error fetching proveedores:', error);
     throw error;
   }
 };
 
 export const getCanalesTransmision = async () => {
   try {
-    const response = await axios.get(`${API_URL}/canaltransmision`);
+    const response = await axios.get(`${API_URL}/canal-transmision`);
     return response.data;
   } catch (error) {
-    console.error('Error fetching canales de transmisión:', error);
     throw error;
   }
 };
 
 export const deleteFarmacia = async (id: number) => {
   try {
-    const response = await axios.put(`${API_URL}/farmacia/softDelete/${id}`);
-    return response.data;
+    await axios.delete(`${API_URL}/farmacia/${id}`);
   } catch (error) {
-    console.error('Error al eliminar la farmacia:', error);
     throw error;
   }
 };
 
-export const createFarmacia = async (data: any) => {
+export const createFarmacia = async (farmacia: any) => {
   try {
-    const response = await axios.post(`${API_URL}/farmacia`, data);
+    const response = await axios.post(`${API_URL}/farmacia`, farmacia);
     return response.data;
   } catch (error) {
-    console.error('Error al crear la farmacia:', error);
-    throw new Error('Error al crear la farmacia');
+    throw error;
   }
 };
 
-export const getFarmaciaById = async (id: number) => {
-  const response = await axios.get(`${API_URL}/farmacia/${id}`);
-  return response.data;
-};
-
-export const updateFarmacia = async (id: number, farmaciaData: any) => {
+export const updateFarmacia = async (id: number, farmacia: any) => {
   try {
-    const response = await axios.put(`${API_URL}/farmacia/${id}`, farmaciaData);
+    const response = await axios.put(`${API_URL}/farmacia/${id}`, farmacia);
     return response.data;
   } catch (error) {
-    console.error('Error al actualizar Farmacia:', error);
-    throw error; 
+    throw error;
   }
 };

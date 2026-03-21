@@ -34,7 +34,7 @@ public class ApiKeyFilter extends OncePerRequestFilter {
 
         // Permitir endpoints públicos de autenticación
         String requestUri = request.getRequestURI();
-        if ("/api/auth/login".equals(requestUri) || "/api/auth/setup".equals(requestUri)) {
+        if ("/api/auth/login".equals(requestUri)) {
             filterChain.doFilter(request, response);
             return;
         }

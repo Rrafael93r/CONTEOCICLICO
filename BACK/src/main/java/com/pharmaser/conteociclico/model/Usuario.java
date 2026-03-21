@@ -18,6 +18,7 @@ public class Usuario {
     private String usuario;
 
     @Column(name = "contrasena", length = 100)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String contrasena;
 
     @Column(name = "sede", length = 45)

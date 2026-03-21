@@ -24,8 +24,12 @@ public class Medicamento {
     @Column(name = "laboratorio", columnDefinition = "TEXT")
     private String laboratorio;
 
-    @Column(name = "ceco")
-    private String ceco;
+    @Column(name = "idusuario")
+    private Integer idUsuario;
+
+    @ManyToOne
+    @JoinColumn(name = "idusuario", insertable = false, updatable = false)
+    private Usuario usuario;
 
     @Column(name = "estadodelconteo")
     private String estadoDelConteo;
