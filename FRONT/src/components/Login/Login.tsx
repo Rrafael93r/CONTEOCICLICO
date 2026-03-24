@@ -89,7 +89,7 @@ const Login = () => {
                     <input
                       type="text"
                       className="w-full pl-11 pr-4 py-4 rounded-2xl bg-gray-50/50 border-2 border-transparent focus:border-orange-400 focus:bg-white outline-none transition-all font-medium text-gray-700 placeholder:text-gray-400"
-                      placeholder="nombre_usuario"
+                      placeholder="Usuario"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       required

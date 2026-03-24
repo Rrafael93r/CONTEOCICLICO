@@ -262,7 +262,7 @@ const AdminPanel: React.FC = () => {
                             onClick={() => setActiveTab('asignar')}
                             className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'asignar' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
                         >
-                            <IconCalendarPlus size={18} /> ASIGNACIÓN DIARIA
+                            <IconCalendarPlus size={18} /> ASIGNACIÓN PERSONALIZADA
                         </button>
                         <button
                             onClick={() => setActiveTab('reportes')}
@@ -304,7 +304,7 @@ const AdminPanel: React.FC = () => {
                             <IconSearch className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
                             <input
                                 type="text"
-                                placeholder="Buscar por usuario o sede..."
+                                placeholder="Buscar por sede..."
                                 value={userSearchTerm}
                                 onChange={(e) => setUserSearchTerm(e.target.value)}
                                 className="w-full pl-14 pr-6 py-4 bg-white rounded-2xl border-2 border-gray-100 focus:border-orange-500 outline-none font-bold text-gray-700 shadow-sm transition-all"
@@ -607,12 +607,7 @@ const AdminPanel: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="mt-12 bg-orange-50/50 p-6 rounded-3xl border border-orange-100 italic">
-                                <p className="text-[10px] text-orange-600 font-black uppercase tracking-[0.15em] mb-2 font-bold">Nota Técnica del Mapeo:</p>
-                                <p className="text-xs text-orange-800 leading-relaxed font-bold uppercase opacity-70">
-                                    El sistema utiliza la columna <strong className="text-orange-950">PLU</strong> como identificador maestro. Para inventario, asegúrate de que la columna <strong className="text-orange-950">SEDE</strong> coincida con los códigos configurados en la gestión de usuarios.
-                                </p>
-                            </div>
+
                         </div>
                     </div>
                 )}
