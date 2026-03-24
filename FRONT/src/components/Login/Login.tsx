@@ -20,8 +20,12 @@ const Login = () => {
 
     try {
       const user = await login(username, password);
-      if (user && user.roles) {
-        navigate('/inicio');
+      if (user && user.rol) {
+        if (user.rol.id === 1) {
+          navigate('/Inicio');
+        } else {
+          navigate('/Admin');
+        }
       } else {
         Swal.fire({
           icon: 'error',
@@ -156,6 +160,7 @@ const Login = () => {
             >
               <img
                 src={sistemas}
+
                 className="max-w-full h-auto object-contain rounded-2xl shadow-2xl shadow-orange-900/10 transform hover:scale-[1.02] transition-transform duration-700"
                 alt="Dashboard Visual"
               />

@@ -15,11 +15,13 @@ const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
   }
 
   if (allowedRoles && !allowedRoles.includes(user.roleId)) {
-    // Redirección basada en rol
-    if (user.roleId === 3) {
-      return <Navigate to="/mi-reporte" />
+    // Redirección basada en rol para evitar bucles o páginas inexistentes
+    if (user.roleId === 1) {
+      return <Navigate to="/Inicio" />
+    } else if (user.roleId === 2 || user.roleId === 3) {
+      return <Navigate to="/Admin" />
     } else {
-      return <Navigate to="/reportes" />
+      return <Navigate to="/login" />
     }
   }
 

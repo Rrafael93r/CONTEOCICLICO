@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getAllDetalles, createDetalle, updateDetalle, DetalleConteo } from '../../servicios/detalleConteoService';
 import { getAllMedicamentos, updateMedicamento, Medicamento } from '../../servicios/medicamentoService';
 import { getAllInventario } from '../../servicios/inventarioService';
+import { getAllPersonalizados } from '../../servicios/personalizadoService';
 import { getCurrentUser } from '../../servicios/authServices';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
@@ -33,13 +34,58 @@ const DetalleConteoTable: React.FC = () => {
             const currentUser = getCurrentUser();
             if (!currentUser) return;
 
-            const [fechaHoy] = new Date().toISOString().split('T');
+            const fechaHoy = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local
 
-            // 1. Verificar si ya existe un lote de registros para hoy (CONSULTA FLASH: Filtrado en el servidor)
-            const hoyUserDetalles = await getAllDetalles(currentUser.id, fechaHoy);
+            // 1. Obtener registros de DetalleConteo ya existentes hoy
+            let hoyUserDetalles = await getAllDetalles(currentUser.id, fechaHoy);
 
+            // 2. Revisar si hay medicamentos "Personalizados" asignados para hoy
+            const hoyPersonalizados = await getAllPersonalizados(currentUser.id, fechaHoy);
+            const inventarioData = await getAllInventario();
+
+            let newPersonalizedFound = false;
+            for (const p of hoyPersonalizados) {
+                // Verificar si este medicamento personalizado ya está en el detalle del día
+                const yaEnDetalle = hoyUserDetalles.some(d => d.idMedicamento === p.idMedicamento);
+                if (!yaEnDetalle) {
+                    const invItem = inventarioData.find(inv => inv.idMedicamento === p.idMedicamento && inv.idUsuario === currentUser.id);
+                    const cantAct = invItem ? invItem.cantidadActual : 0;
+
+                    // Crear el registro de DetalleConteo como "Personalizado"
+                    const newDetalle = await createDetalle({
+                        idMedicamento: p.idMedicamento,
+                        idUsuario: currentUser.id,
+                        cantidadContada: null,
+                        cantidadActual: cantAct,
+                        fechaRegistro: fechaHoy,
+                        horaRegistro: null,
+                        tipoConteo: 'Personalizado'
+                    });
+
+                    // Marcar medicamento como contado (opcional, igual que en cíclico)
+                    await updateMedicamento(p.idMedicamento, { id: p.idMedicamento, estadoDelConteo: 'sí' } as any);
+                    
+                    // IMPORTANTE: Unimos la información del medicamento para que se renderice en la tabla
+                    hoyUserDetalles.push({
+                        ...newDetalle,
+                        medicamento: p.medicamento
+                    });
+                    newPersonalizedFound = true;
+                }
+            }
+
+            // Fallback de seguridad: Si algún detalle no tiene el objeto medicamento, lo buscamos en la lista global
+            const allMedsForLookup = await getAllMedicamentos();
+            hoyUserDetalles = hoyUserDetalles.map(d => {
+                if (!d.medicamento && d.idMedicamento) {
+                    const found = allMedsForLookup.find(m => m.id === d.idMedicamento);
+                    if (found) return { ...d, medicamento: found };
+                }
+                return d;
+            });
+
+            // Si encontramos personalizados nuevos, los recargamos o simplemente actualizamos la lista
             if (hoyUserDetalles.length > 0) {
-                // Ya existe el lote, lo cargamos para edición
                 const prepared: DetalleConteoEditable[] = hoyUserDetalles.map(d => ({
                     ...d,
                     inputValue: d.cantidadContada !== null ? d.cantidadContada : ''
@@ -49,16 +95,11 @@ const DetalleConteoTable: React.FC = () => {
                 return;
             }
 
-            // 2. Si no existe, procedemos a GENERAR el lote del día (Quota Fulfillment)
-            const allMeds = await getAllMedicamentos();
-            const inventarioData = await getAllInventario();
-
-            // Filtrar solo los del usuario con estado 'no'
-            const pendingMeds = allMeds.filter(m => 
+            // 3. Si no hay nada (ni previo ni personalizado), generamos el lote Cíclico
+            const pendingMeds = allMedsForLookup.filter(m => 
                 m.idUsuario === currentUser.id && m.estadoDelConteo?.toLowerCase() === 'no'
             );
 
-            // Ordenar para agrupamiento determinista
             const sortedMeds = [...pendingMeds].sort((a, b) => 
                 a.codigoGenerico.localeCompare(b.codigoGenerico, undefined, { numeric: true, sensitivity: 'base' })
             );
@@ -130,6 +171,7 @@ const DetalleConteoTable: React.FC = () => {
 
                 createdDetalles.push({
                     ...newDetalle,
+                    medicamento: m, // Attach medication info
                     inputValue: '' as number | ''
                 });
             }));
@@ -249,8 +291,8 @@ const DetalleConteoTable: React.FC = () => {
                 
                 <div className="flex flex-wrap justify-center items-center gap-3">
                     <div className="bg-orange-50 px-6 py-3 rounded-2xl border-2 border-orange-100/50 flex flex-col items-center">
-                        <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest leading-none mb-1">Total Lote</span>
-                        <span className="text-xl font-black text-orange-600 leading-none">{detalles.length}</span>
+                        <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest leading-none mb-1">Pendientes</span>
+                        <span className="text-xl font-black text-orange-600 leading-none">{detalles.filter(d => d.cantidadContada === null).length}</span>
                     </div>
                     <button 
                         onClick={fetchData}
@@ -276,7 +318,7 @@ const DetalleConteoTable: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 text-sm">
-                            {detalles.map((d) => (
+                            {detalles.filter(d => d.cantidadContada === null).map((d) => (
                                 <tr key={d.id} className="hover:bg-orange-50/10 transition-colors group">
                                     <td className="px-10 py-8">
                                         <div className="flex flex-col">
@@ -337,9 +379,9 @@ const DetalleConteoTable: React.FC = () => {
                 </div>
             </div>
 
-            {/* Vista Móvil: Cards (Oculta en PC >= 1024px) */}
+            {/* Vista Móvil: Cards */}
             <div className="lg:hidden space-y-4 px-1">
-                {detalles.map((d) => (
+                {detalles.filter(d => d.cantidadContada === null).map((d) => (
                     <div key={d.id} className={`bg-white rounded-3xl p-6 shadow-lg border-2 transition-all ${d.cantidadContada !== null ? 'border-green-100 opacity-80' : 'border-white hover:border-orange-200'}`}>
                         <div className="flex justify-between items-start mb-4">
                             <div className="flex-1">
@@ -387,7 +429,7 @@ const DetalleConteoTable: React.FC = () => {
             </div>
 
             {/* Empty State */}
-            {detalles.length === 0 && !loading && (
+            {detalles.filter(d => d.cantidadContada === null).length === 0 && !loading && (
                 <div className="bg-white rounded-[2.5rem] p-20 text-center shadow-xl border border-gray-100">
                     <div className="flex flex-col items-center">
                         <div className="w-24 h-24 bg-orange-50 text-orange-200 rounded-[2rem] flex items-center justify-center mb-8 rotate-12">

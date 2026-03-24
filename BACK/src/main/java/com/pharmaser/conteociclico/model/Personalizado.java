@@ -17,7 +17,7 @@ public class Personalizado {
     @Column(name = "idmedicamento")
     private Integer idMedicamento;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "idmedicamento", insertable = false, updatable = false)
     private Medicamento medicamento;
 

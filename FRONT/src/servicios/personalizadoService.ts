@@ -21,10 +21,10 @@ export interface Personalizado {
     fechaProgramacion: string;
 }
 
-export const getAllPersonalizados = async (idUsuario?: number): Promise<Personalizado[]> => {
+export const getAllPersonalizados = async (idUsuario?: number, fechaProgramacion?: string): Promise<Personalizado[]> => {
     try {
         const response = await axios.get(API_URL, {
-            params: { idUsuario }
+            params: { idUsuario, fechaProgramacion }
         });
         return response.data;
     } catch (error) {

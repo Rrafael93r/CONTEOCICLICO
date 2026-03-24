@@ -5,10 +5,11 @@ const API_URL = 'http://localhost:8080/api/auth/login';
 interface User {
   id: number;
   usuario: string;
-  roles: {
+  rol: {
     id: number;
-    name: string;
+    nombre: string;
   };
+  numeroConteo?: number;
 }
 
 export const login = async (username: string, password: string): Promise<User> => {
@@ -17,14 +18,14 @@ export const login = async (username: string, password: string): Promise<User> =
 
     const { token, user } = response.data;
 
-    if (!user || !user.roles || typeof user.roles.id === 'undefined') {
+    if (!user || !user.rol || typeof user.rol.id === 'undefined') {
       throw new Error('Estructura de usuario inválida');
     }
 
     const userInfo = {
       id: user.id,
       usuario: user.usuario, 
-      roleId: user.roles.id,
+      roleId: user.rol.id,
       token: token,
       numeroConteo: user.numeroConteo
     };

@@ -27,14 +27,10 @@ public class Usuario {
     @Column(name = "numeroconteo")
     private Integer numeroConteo;
 
-    @jakarta.persistence.Transient
-    private Role roles = new Role(1, "ADMIN");
+    @Column(name = "idrol")
+    private Integer idRol;
 
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class Role {
-        private int id;
-        private String name;
-    }
+    @ManyToOne
+    @JoinColumn(name = "idrol", insertable = false, updatable = false)
+    private Rol rol;
 }

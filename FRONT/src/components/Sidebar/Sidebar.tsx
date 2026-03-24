@@ -32,9 +32,9 @@ const Sidebar: React.FC = () => {
 
   const getRoleName = (roleId: number) => {
     const roles: Record<number, string> = {
-      1: "Administrador",
-      2: "Tecnico",
-      3: "Reportador",
+      1: "Farmacia",
+      2: "Control de Inventario",
+      3: "Administrador",
     };
     return roles[roleId] || "Desconocido";
   };
@@ -47,13 +47,18 @@ const Sidebar: React.FC = () => {
           label: "Conteo ciclico",
           icon: IconListCheck,
           path: "/Inicio",
-          rolesAllowed: [1, 2, 3],
+          rolesAllowed: [1, 3], // Farmacia y Administrador
         },
+      ],
+    },
+    {
+      heading: "ADMINISTRACIÓN",
+      items: [
         {
-          label: "Conteo personalizado",
-          icon: IconListCheck,
-          path: "/ConteoPersonalizado",
-          rolesAllowed: [1, 2, 3],
+          label: "Panel de Gestión",
+          icon: IconSettings,
+          path: "/Admin",
+          rolesAllowed: [2, 3], // Control de Inventario y Administrador
         },
       ],
     },

@@ -2,7 +2,7 @@ import { Route, Routes, Navigate } from "react-router-dom"
 import Login from "../components/Login/Login"
 import ProtectedRoute from "../Rutas/ProtectedRoute"
 import Inicio from "../Paginas/Inicio"
-import ConteoPersonalizadoPage from "../Paginas/ConteoPersonalizadoPage"
+import AdminPage from "../Paginas/AdminPage"
 
 export const AppRutas = () => {
   return (
@@ -11,16 +11,16 @@ export const AppRutas = () => {
 
       <Route path="/Inicio"
         element={
-          <ProtectedRoute allowedRoles={[1, 2, 3]}>
+          <ProtectedRoute allowedRoles={[1, 3]}>
             < Inicio />
           </ProtectedRoute>
         }
       />
 
-      <Route path="/ConteoPersonalizado"
+      <Route path="/Admin"
         element={
-          <ProtectedRoute allowedRoles={[1, 2, 3]}>
-            < ConteoPersonalizadoPage />
+          <ProtectedRoute allowedRoles={[2, 3]}>
+            < AdminPage />
           </ProtectedRoute>
         }
       />

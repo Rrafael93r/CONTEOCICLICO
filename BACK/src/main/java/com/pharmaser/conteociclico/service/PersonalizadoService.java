@@ -17,7 +17,12 @@ public class PersonalizadoService {
         return personalizadoRepository.findByIdUsuario(idUsuario);
     }
 
+    public List<Personalizado> getPersonalizadosByUsuarioYFechaProgramacion(Integer idUsuario, java.time.LocalDate fecha) {
+        return personalizadoRepository.findByIdUsuarioAndFechaProgramacion(idUsuario, fecha);
+    }
     public List<Personalizado> getAllPersonalizados() {
+        return personalizadoRepository.findAll();
+    }
 
     public Optional<Personalizado> getPersonalizadoById(Integer id) {
         return personalizadoRepository.findById(id);

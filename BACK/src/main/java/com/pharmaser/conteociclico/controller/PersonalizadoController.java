@@ -15,7 +15,11 @@ public class PersonalizadoController {
     private PersonalizadoService personalizadoService;
 
     @GetMapping
-    public List<Personalizado> getAll(@RequestParam(required = false) Integer idUsuario) {
+    public List<Personalizado> getAll(@RequestParam(required = false) Integer idUsuario,
+                                     @RequestParam(required = false) String fechaProgramacion) {
+        if (idUsuario != null && fechaProgramacion != null) {
+            return personalizadoService.getPersonalizadosByUsuarioYFechaProgramacion(idUsuario, java.time.LocalDate.parse(fechaProgramacion));
+        }
         if (idUsuario != null) {
             return personalizadoService.getPersonalizadosByUsuario(idUsuario);
         }
