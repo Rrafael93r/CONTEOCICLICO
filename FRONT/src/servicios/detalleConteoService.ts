@@ -1,12 +1,13 @@
 import axios from './axiosConfig';
 
-const API_URL = 'http://localhost:8080/api/detalle-conteo';
+const API_URL = '/api/detalle-conteo';
 
 export interface DetalleConteo {
     id: number;
     idMedicamento: number;
     idUsuario: number;
     medicamento?: {
+        id: number;
         plu: string;
         codigoGenerico: string;
         descripcion: string;
@@ -15,6 +16,7 @@ export interface DetalleConteo {
     };
     usuario?: {
         usuario: string;
+        sede: string;
     };
     cantidadContada: number | null;
     cantidadActual: number;

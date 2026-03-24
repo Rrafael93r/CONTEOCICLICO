@@ -1,6 +1,6 @@
 import axios from './axiosConfig';
 
-const API_URL = 'http://localhost:8080/api/usuario';
+const API_URL = '/api/usuario';
 
 export interface Usuario {
     id: number;

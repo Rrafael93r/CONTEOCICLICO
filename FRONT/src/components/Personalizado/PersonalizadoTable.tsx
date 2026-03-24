@@ -13,7 +13,7 @@ const PersonalizadoTable: React.FC = () => {
         try {
             const currentUser = getCurrentUser();
             if (!currentUser) return;
-            
+
             const data = await getAllPersonalizados(currentUser.id);
             setPersonalizados(data);
         } catch (error) {
@@ -56,13 +56,13 @@ const PersonalizadoTable: React.FC = () => {
                         Gestión de Programaciones Específicas
                     </p>
                 </div>
-                
+
                 <div className="flex flex-wrap justify-center items-center gap-3">
                     <div className="bg-orange-50 px-6 py-3 rounded-2xl border-2 border-orange-100/50 flex flex-col items-center">
                         <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest leading-none mb-1">Activos</span>
                         <span className="text-xl font-black text-orange-600 leading-none">{personalizados.length}</span>
                     </div>
-                    <button 
+                    <button
                         onClick={fetchData}
                         className="p-4 text-gray-400 hover:bg-gray-900 hover:text-white transition-all bg-white rounded-2xl border-2 border-gray-100 shadow-sm active:scale-95 group"
                     >
@@ -150,7 +150,7 @@ const PersonalizadoTable: React.FC = () => {
                                 <span className="text-[10px] font-black">#{p.id}</span>
                             </div>
                         </div>
-                        
+
                         <div className="space-y-4">
                             <div className="flex items-center justify-between text-[11px] py-4 border-y border-gray-50 font-bold">
                                 <div className="flex items-center gap-2 text-gray-400 uppercase tracking-widest">
@@ -159,7 +159,7 @@ const PersonalizadoTable: React.FC = () => {
                                 </div>
                                 <span className="text-gray-900 uppercase">{p.usuario?.usuario || 'S/A'}</span>
                             </div>
-                            
+
                             <div className="flex items-center justify-between py-2">
                                 <div className="flex flex-col">
                                     <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Fecha Programada</span>
@@ -187,7 +187,6 @@ const PersonalizadoTable: React.FC = () => {
                 </div>
             )}
 
-            {/* Botón Flotante para Acciones Globales (Ejemplo de consistencia) */}
             <div className="fixed bottom-10 left-0 right-0 px-6 z-40 flex justify-center pointer-events-none">
                 <div className="max-w-md w-full pointer-events-auto">
                     <button

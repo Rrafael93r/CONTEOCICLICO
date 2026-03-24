@@ -1,5 +1,6 @@
 package com.pharmaser.conteociclico.controller;
 
+import com.pharmaser.conteociclico.dto.InventarioImportDTO;
 import com.pharmaser.conteociclico.model.Inventario;
 import com.pharmaser.conteociclico.service.InventarioService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,12 @@ public class InventarioController {
     @PostMapping
     public Inventario create(@RequestBody Inventario inventario) {
         return inventarioService.saveInventario(inventario);
+    }
+
+    @PostMapping("/bulk")
+    public ResponseEntity<String> bulkImport(@RequestBody List<InventarioImportDTO> items) {
+        inventarioService.importFromExternalData(items);
+        return ResponseEntity.ok("Importación exitosa");
     }
 
     @DeleteMapping("/{id}")

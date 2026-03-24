@@ -1,12 +1,13 @@
 import axios from './axiosConfig';
 
-const API_URL = 'http://localhost:8080/api/personalizado';
+const API_URL = '/api/personalizado';
 
 export interface Personalizado {
     id: number;
     idMedicamento: number;
     idUsuario: number;
     medicamento?: {
+        id: number;
         plu: string;
         descripcion: string;
         codigoGenerico: string;

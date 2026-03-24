@@ -2,6 +2,10 @@ import axios from 'axios';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
+// Centralización del BaseURL para producción/desarrollo
+const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+axios.defaults.baseURL = API_URL;
+
 // Configurar interceptor globalmente
 axios.interceptors.request.use(
     (config) => {

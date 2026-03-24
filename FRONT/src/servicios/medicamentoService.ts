@@ -1,6 +1,6 @@
 import axios from './axiosConfig';
 
-const API_URL = 'http://localhost:8080/api/medicamento';
+const API_URL = '/api/medicamento';
 
 export interface Medicamento {
     id: number;
@@ -24,6 +24,14 @@ export const getAllMedicamentos = async (): Promise<Medicamento[]> => {
 export const updateMedicamento = async (id: number, medicamento: Partial<Medicamento>): Promise<Medicamento> => {
     try {
         const response = await axios.put(`${API_URL}/${id}`, medicamento);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+export const bulkImportMedicamentos = async (items: any[]) => {
+    try {
+        const response = await axios.post(`${API_URL}/bulk`, items);
         return response.data;
     } catch (error) {
         throw error;

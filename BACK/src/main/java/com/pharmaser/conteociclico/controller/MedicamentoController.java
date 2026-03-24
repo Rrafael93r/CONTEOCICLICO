@@ -1,5 +1,6 @@
 package com.pharmaser.conteociclico.controller;
 
+import com.pharmaser.conteociclico.dto.MedicamentoImportDTO;
 import com.pharmaser.conteociclico.model.Medicamento;
 import com.pharmaser.conteociclico.service.MedicamentoService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,12 @@ public class MedicamentoController {
     @GetMapping
     public List<Medicamento> getAll() {
         return medicamentoService.getAllMedicamentos();
+    }
+
+    @PostMapping("/bulk")
+    public ResponseEntity<String> bulkImport(@RequestBody List<MedicamentoImportDTO> items) {
+        medicamentoService.importFromExternalData(items);
+        return ResponseEntity.ok("Catálogo actualizado exitosamente");
     }
 
     @GetMapping("/{id}")

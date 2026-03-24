@@ -22,7 +22,6 @@ public class RoleDataLoader implements CommandLineRunner {
                 new Rol(2, "Control de Inventario"),
                 new Rol(3, "Administrador")
             ));
-            System.out.println("Roles inicializados correctamente.");
         }
     }
 }
