@@ -44,6 +44,17 @@ public class DetalleConteoService {
     }
 
     public DetalleConteo saveDetalle(DetalleConteo detalle) {
+        // Evitar duplicados si es un nuevo registro
+        if (detalle.getId() == null) {
+            List<DetalleConteo> existentes = detalleConteoRepository.findByIdUsuarioAndFechaRegistro(detalle.getIdUsuario(), detalle.getFechaRegistro());
+            for (DetalleConteo e : existentes) {
+                if (e.getIdMedicamento().equals(detalle.getIdMedicamento()) && 
+                    e.getTipoConteo().equals(detalle.getTipoConteo()) &&
+                    e.getCantidadContada() == null) {
+                    return e; // Ya existe uno pendiente, retornamos el existente
+                }
+            }
+        }
         return detalleConteoRepository.save(detalle);
     }
 

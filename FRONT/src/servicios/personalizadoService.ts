@@ -12,6 +12,7 @@ export interface Personalizado {
         descripcion: string;
         codigoGenerico: string;
         laboratorio: string;
+        inventario: number;
     };
     usuario?: {
         usuario: string;

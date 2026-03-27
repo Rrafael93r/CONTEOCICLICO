@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getAllUsuarios, updateUsuario, Usuario } from '../../servicios/usuarioService';
-import { getAllMedicamentos, Medicamento } from '../../servicios/medicamentoService';
+import { getAllMedicamentos, Medicamento, bulkImportMedicamentos, bulkUpdateInventory, resetCycleByUsuario } from '../../servicios/medicamentoService';
 import { createPersonalizado } from '../../servicios/personalizadoService';
 import { getAllDetalles, DetalleConteo } from '../../servicios/detalleConteoService';
 import Swal from 'sweetalert2';
@@ -20,8 +20,6 @@ import {
     IconDatabaseImport,
     IconFilePlus
 } from '@tabler/icons-react';
-import { bulkImportMedicamentos } from '../../servicios/medicamentoService';
-import { bulkImportInventario } from '../../servicios/inventarioService';
 
 const AdminPanel: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'usuarios' | 'asignar' | 'reportes' | 'importar'>('usuarios');
@@ -51,9 +49,10 @@ const AdminPanel: React.FC = () => {
         setLoading(true);
         try {
             if (activeTab === 'usuarios') {
-                const data = await getAllUsuarios();
+                const [uData, mData] = await Promise.all([getAllUsuarios(), getAllMedicamentos()]);
                 // Solo mostrar usuarios con Rol 1 (Farmacia)
-                setUsuarios(data.filter(u => u.rol?.id === 1));
+                setUsuarios(uData.filter(u => u.rol?.id === 1));
+                setMedicamentos(mData);
             } else if (activeTab === 'asignar') {
                 const [uData, mData] = await Promise.all([getAllUsuarios(), getAllMedicamentos()]);
                 // Solo mostrar usuarios con Rol 1 (Farmacia) para asignar
@@ -131,6 +130,31 @@ const AdminPanel: React.FC = () => {
         }
     };
 
+    const handleResetCycle = async (idUsuario: number, userName: string) => {
+        const result = await Swal.fire({
+            title: '¿Reiniciar Ciclo?',
+            text: `Se habilitarán todos los medicamentos de ${userName.toUpperCase()} que ya fueron marcados como contados para que vuelvan a aparecer en el ciclo.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#f6952c',
+            confirmButtonText: 'Sí, reiniciar todo',
+            cancelButtonText: 'Cancelar'
+        });
+
+        if (!result.isConfirmed) return;
+
+        try {
+            setLoading(true);
+            await resetCycleByUsuario(idUsuario);
+            Swal.fire('Ciclo Reiniciado', 'Los medicamentos ahora están disponibles para contar nuevamente.', 'success');
+            loadInitialData(); // Refresh counts
+        } catch (error) {
+            Swal.fire('Error', 'No se pudo reiniciar el ciclo.', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const downloadReport = () => {
         let filteredData = [...detalles];
 
@@ -180,7 +204,7 @@ const AdminPanel: React.FC = () => {
         if (!file) return;
 
         const controller = new AbortController();
-        
+
         Swal.fire({
             title: '<span class="text-2xl font-black text-gray-900 uppercase italic">Procesando Datos</span>',
             html: `
@@ -200,7 +224,9 @@ const AdminPanel: React.FC = () => {
             },
             showConfirmButton: false
         }).then((result) => {
-            if (result.isDismissed && result.dismiss === Swal.DismissReason.cancel) {
+            if (result.isConfirmed) {
+                // Not relevant for showConfirmButton: false
+            } else if (result.isDismissed && result.dismiss === Swal.DismissReason.cancel) {
                 controller.abort();
                 Swal.fire({
                     icon: 'info',
@@ -228,30 +254,17 @@ const AdminPanel: React.FC = () => {
                         setUsuarios(currentUsers);
                     }
 
-                    // DIAGNÓSTICO: Ver qué tenemos disponible
-                    console.log("Usuarios en sistema (primeros 5):", currentUsers.slice(0, 5).map(u => ({ id: u.id, sede: u.sede, usuario: u.usuario })));
-                    console.log("Primeros 5 registros Excel:", jsonData.slice(0, 5));
-
                     const mapped = jsonData.map((row, index) => {
-                        // Capturamos cualquier variante de la columna Sede
                         const rawSede = row.Sede || row.sede || row.SEDE || row['Sede '] || row['SEDE '];
                         const sedeCode = String(rawSede || '').trim();
-                        
+
                         const foundUser = currentUsers.find(u => {
-                            // 1. Prioridad: Comparación numérica de Sede (Sede 1 == 001)
                             const uSedeNum = u.sede ? parseInt(String(u.sede).trim(), 10) : NaN;
                             const rowSedeNum = sedeCode ? parseInt(sedeCode, 10) : NaN;
                             if (!isNaN(uSedeNum) && !isNaN(rowSedeNum) && uSedeNum === rowSedeNum) return true;
-
-                            // 2. Respaldo: Comparación exacta de Texto
                             if (u.sede && String(u.sede).toUpperCase() === sedeCode.toUpperCase()) return true;
-
                             return false;
                         });
-
-                        if (!foundUser && index < 5) {
-                            console.warn(`No se encontró usuario para Fila ${index + 1}: Sede=[${sedeCode}]`);
-                        }
 
                         return {
                             plu: String(row.PLU || row.plu || ''),
@@ -269,16 +282,15 @@ const AdminPanel: React.FC = () => {
                         Swal.fire({
                             icon: 'error',
                             title: '<span class="text-xl font-black text-red-600 uppercase">Usuarios no encontrados</span>',
-                            text: 'Algunos registros del Excel no pudieron vincularse a un usuario existente. Por favor, revisa los códigos de sede o nombres de punto.',
+                            text: 'Algunos registros del Excel no pudieron vincularse a un usuario existente. Revisa los códigos de sede.',
                             confirmButtonColor: '#dc2626',
                             customClass: { popup: 'rounded-[2rem]' }
                         });
-                        return; // Detener la importación si hay usuarios no encontrados
+                        return;
                     }
 
-                    console.log("Ejemplo de mapeo final (primer registro):", mapped[0]);
-                    await axios.post('/api/medicamento/bulk', mapped, { signal: controller.signal });
-                    
+                    await bulkImportMedicamentos(mapped);
+
                     Swal.fire({
                         icon: 'success',
                         title: '<span class="text-xl font-black text-gray-900 uppercase">¡Sincronización Exitosa!</span>',
@@ -293,8 +305,8 @@ const AdminPanel: React.FC = () => {
                         cantidad: parseInt(row.SALDO || row.saldo || row.CANTIDAD || row.Inventario || '0')
                     })).filter(item => item.plu && item.sede);
 
-                    await axios.post('/api/inventario/bulk', mapped, { signal: controller.signal });
-                    
+                    await bulkUpdateInventory(mapped);
+
                     Swal.fire({
                         icon: 'success',
                         title: '<span class="text-xl font-black text-gray-900 uppercase">¡Inventario Sincronizado!</span>',
@@ -308,10 +320,9 @@ const AdminPanel: React.FC = () => {
                 if (error.name === 'CanceledError') return;
                 Swal.fire({
                     icon: 'error',
-                    title: '<span class="text-xl font-black text-red-600 uppercase">Fallo en Importación</span>',
-                    text: 'El archivo Excel no tiene el formato correcto o la conexión falló.',
-                    confirmButtonColor: '#dc2626',
-                    customClass: { popup: 'rounded-[2rem]' }
+                    title: 'Fallo en Importación',
+                    text: 'El archivo Excel no tiene el formato correcto.',
+                    confirmButtonColor: '#dc2626'
                 });
             } finally {
                 if (e.target) e.target.value = '';
@@ -321,18 +332,17 @@ const AdminPanel: React.FC = () => {
     };
 
     const downloadTemplate = (type: 'medicamento' | 'inventario') => {
-        const headers = type === 'medicamento' 
+        const headers = type === 'medicamento'
             ? [['Sede', 'Generico', 'PLU', 'Descripcion', 'Inventario', 'Costo', 'Costo total', 'Laboratorio']]
             : [['SEDE', 'PLU']];
-            
+
         const worksheet = XLSX.utils.aoa_to_sheet(headers);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Plantilla");
-        
-        // Ajustar anchos
-        const wscols = type === 'medicamento' 
-            ? [{wch:10}, {wch:15}, {wch:15}, {wch:40}, {wch:10}, {wch:10}, {wch:15}, {wch:20}]
-            : [{wch:15}, {wch:15}];
+
+        const wscols = type === 'medicamento'
+            ? [{ wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 40 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 20 }]
+            : [{ wch: 15 }, { wch: 15 }];
         worksheet['!cols'] = wscols;
 
         XLSX.writeFile(workbook, `PLANTILLA_${type.toUpperCase()}.xlsx`);
@@ -342,7 +352,7 @@ const AdminPanel: React.FC = () => {
         (m.descripcion?.toLowerCase() || '').includes(medSearchTerm.toLowerCase()) ||
         (m.plu || '').includes(medSearchTerm) ||
         (m.codigoGenerico || '').includes(medSearchTerm)
-    ).slice(0, 10); // Limit results for performance
+    ).slice(0, 10);
 
     const filteredUsers = (usuarios || []).filter(u =>
         u.usuario?.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
@@ -355,7 +365,7 @@ const AdminPanel: React.FC = () => {
             <div className="bg-white rounded-3xl sm:rounded-[2.5rem] p-6 sm:p-8 shadow-xl shadow-gray-200/50 border border-gray-100 flex flex-col md:flex-row justify-between items-center gap-6">
                 <div className="flex items-center gap-4 sm:gap-5">
                     <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-900 rounded-2xl sm:rounded-[1.5rem] flex items-center justify-center text-white shadow-2xl shadow-gray-900/20">
-                        <IconSettings size={28} className="sm:size-32" />
+                        <IconSettings size={28} />
                     </div>
                     <div>
                         <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">PANEL DE GESTIÓN</h2>
@@ -366,40 +376,26 @@ const AdminPanel: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Pestañas / Navegación Interna */}
-                <div className="w-full px-4 sm:px-8 pb-4 border-b border-gray-100 overflow-x-auto no-scrollbar">
-                    <div className="flex gap-4 min-w-max">
-                        <button
-                            onClick={() => setActiveTab('usuarios')}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'usuarios' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                        >
-                            <IconUsers size={18} /> GESTIÓN DE USUARIOS
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('asignar')}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'asignar' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                        >
-                            <IconCalendarPlus size={18} /> ASIGNACIÓN PERSONALIZADA
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('reportes')}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'reportes' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                        >
-                            <IconFileSpreadsheet size={18} /> REPORTES
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('importar')}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === 'importar' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                        >
-                            <IconDatabaseImport size={18} /> IMPORTACIÓN
-                        </button>
+                <div className="w-full md:w-auto overflow-x-auto no-scrollbar">
+                    <div className="flex bg-gray-50 p-2 rounded-2xl gap-2 min-w-max">
+                        {(['usuarios', 'asignar', 'reportes', 'importar'] as const).map(tab => (
+                            <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                            >
+                                {tab === 'usuarios' && <IconUsers size={18} />}
+                                {tab === 'asignar' && <IconCalendarPlus size={18} />}
+                                {tab === 'reportes' && <IconFileSpreadsheet size={18} />}
+                                {tab === 'importar' && <IconDatabaseImport size={18} />}
+                                {tab.toUpperCase()}
+                            </button>
+                        ))}
                     </div>
                 </div>
             </div>
 
-            {/* Contenido Principal */}
             <div className="bg-white rounded-3xl sm:rounded-[2.5rem] shadow-2xl shadow-gray-200/30 border border-gray-100 overflow-hidden min-h-[400px] md:min-h-[600px]">
-
                 {activeTab === 'usuarios' && (
                     <div className="p-4 sm:p-8">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
@@ -410,13 +406,12 @@ const AdminPanel: React.FC = () => {
                             <button
                                 onClick={handleSaveAllQuotas}
                                 disabled={loading}
-                                className="flex items-center gap-3 px-8 py-4 bg-orange-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 disabled:opacity-50"
+                                className="flex items-center gap-2 px-8 py-4 bg-orange-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 disabled:opacity-50"
                             >
-                                <IconDeviceFloppy size={20} /> GUARDAR
+                                <IconDeviceFloppy size={20} /> GUARDAR CAMBIOS
                             </button>
                         </div>
 
-                        {/* Buscador de Usuarios */}
                         <div className="mb-6 relative">
                             <IconSearch className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
                             <input
@@ -428,24 +423,24 @@ const AdminPanel: React.FC = () => {
                             />
                         </div>
 
-                        {/* Vista de Escritorio (Tabla) */}
                         <div className="hidden md:block bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
                             <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
                                         <tr className="bg-gray-50/50">
                                             <th className="px-8 py-5 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Usuario / Sede</th>
+                                            <th className="px-8 py-5 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Pendientes Por Contar</th>
                                             <th className="px-8 py-5 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Cuota Diaria</th>
-
+                                            <th className="px-8 py-5 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Acciones</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-50">
-                                        {filteredUsers.filter(u => u.rol?.id === 1).map(u => (
+                                        {filteredUsers.map(u => (
                                             <tr key={u.id} className="hover:bg-gray-50/30 transition-colors">
                                                 <td className="px-8 py-6">
                                                     <div className="flex items-center gap-4">
                                                         <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center font-black">
-                                                            {u.usuario.charAt(0).toUpperCase()}
+                                                            {u.usuario?.charAt(0).toUpperCase()}
                                                         </div>
                                                         <div>
                                                             <div className="font-black text-gray-900 text-sm uppercase">{u.usuario}</div>
@@ -454,20 +449,31 @@ const AdminPanel: React.FC = () => {
                                                     </div>
                                                 </td>
                                                 <td className="px-8 py-6 text-center">
-                                                    <div className="flex justify-center items-center gap-2">
-                                                        <input
-                                                            type="number"
-                                                            min="0"
-                                                            value={u.numeroConteo || 0}
-                                                            onChange={(e) => {
-                                                                const val = Math.max(0, parseInt(e.target.value) || 0);
-                                                                setUsuarios(prev => prev.map(user => user.id === u.id ? { ...user, numeroConteo: val } : user));
-                                                            }}
-                                                            className="w-24 text-center py-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-orange-500 outline-none font-black text-orange-600 text-lg shadow-inner"
-                                                        />
-                                                    </div>
+                                                    <span className="text-sm font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-lg">
+                                                        {medicamentos.filter(m => m.idUsuario === u.id && m.estadoDelConteo?.toLowerCase() === 'no').length}
+                                                    </span>
                                                 </td>
-
+                                                <td className="px-8 py-6 text-center">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        value={u.numeroConteo || 0}
+                                                        onChange={(e) => {
+                                                            const val = Math.max(0, parseInt(e.target.value) || 0);
+                                                            setUsuarios(prev => prev.map(user => user.id === u.id ? { ...user, numeroConteo: val } : user));
+                                                        }}
+                                                        className="w-24 text-center py-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-orange-500 outline-none font-black text-orange-600 text-lg"
+                                                    />
+                                                </td>
+                                                <td className="px-8 py-6 text-right">
+                                                    <button
+                                                        onClick={() => handleResetCycle(u.id, u.usuario)}
+                                                        disabled={loading}
+                                                        className="px-4 py-2 bg-gray-100 text-gray-500 hover:bg-orange-500 hover:text-white rounded-xl text-[9px] font-black uppercase transition-all"
+                                                    >
+                                                        Reiniciar Ciclo
+                                                    </button>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -475,26 +481,26 @@ const AdminPanel: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Vista Móvil (Tarjetas) */}
                         <div className="md:hidden space-y-4">
-                            {filteredUsers.filter(u => u.rol?.id === 1).map(u => (
+                            {filteredUsers.map(u => (
                                 <div key={u.id} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-                                    <div className="flex items-center gap-3 mb-4">
-                                        <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center font-black text-lg">
-                                            {u.usuario.charAt(0).toUpperCase()}
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center font-black">
+                                                {u.usuario?.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <div className="font-black text-gray-900 text-sm uppercase">{u.usuario}</div>
+                                                <div className="text-[10px] font-bold text-gray-400 tracking-widest uppercase">Sede: {u.sede || 'Global'}</div>
+                                            </div>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="font-black text-gray-900 text-sm uppercase truncate">{u.usuario}</div>
-                                            <div className="text-[10px] font-bold text-gray-400 tracking-widest uppercase mt-0.5">Sede: {u.sede || 'Global'}</div>
-                                        </div>
-                                        <button className="p-2 text-gray-300 hover:text-orange-500 transition-colors">
-                                            <IconSettings size={18} />
-                                        </button>
+                                        <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
+                                            {medicamentos.filter(m => m.idUsuario === u.id && m.estadoDelConteo?.toLowerCase() === 'no').length} pendientes
+                                        </span>
                                     </div>
-
-                                    <div className="pt-4 border-t border-gray-50">
-                                        <div className="flex flex-col gap-2">
-                                            <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Cuota Diaria</label>
+                                    <div className="flex items-center justify-between gap-4 pt-4 border-t border-gray-50">
+                                        <div className="flex-1">
+                                            <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Cuota Diaria</p>
                                             <input
                                                 type="number"
                                                 min="0"
@@ -503,9 +509,16 @@ const AdminPanel: React.FC = () => {
                                                     const val = Math.max(0, parseInt(e.target.value) || 0);
                                                     setUsuarios(prev => prev.map(user => user.id === u.id ? { ...user, numeroConteo: val } : user));
                                                 }}
-                                                className="w-full py-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-orange-500 outline-none font-black text-orange-600 text-xl text-center shadow-inner"
+                                                className="w-full py-2 bg-gray-50 rounded-xl text-center font-black text-orange-600"
                                             />
                                         </div>
+                                        <button
+                                            onClick={() => handleResetCycle(u.id, u.usuario)}
+                                            disabled={loading}
+                                            className="px-4 py-3 bg-gray-900 text-white rounded-xl text-[9px] font-black uppercase"
+                                        >
+                                            Reiniciar
+                                        </button>
                                     </div>
                                 </div>
                             ))}
@@ -521,17 +534,17 @@ const AdminPanel: React.FC = () => {
                                 <p className="text-gray-400 font-bold text-sm uppercase tracking-widest italic">Asigna un medicamento específico a un usuario para una fecha determinada.</p>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 gap-6">
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">1. Seleccionar Usuario</label>
                                     <select
                                         value={selectedUser}
                                         onChange={(e) => setSelectedUser(Number(e.target.value))}
-                                        className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 appearance-none cursor-pointer"
+                                        className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 cursor-pointer"
                                     >
                                         <option value="">Selecciona un usuario...</option>
                                         {usuarios.map(u => (
-                                            <option key={u.id} value={u.id}>{u.usuario.toUpperCase()} - {u.sede || 'Sede Global'}</option>
+                                            <option key={u.id} value={u.id}>{u.usuario.toUpperCase()} - {u.sede || 'Global'}</option>
                                         ))}
                                     </select>
                                 </div>
@@ -549,7 +562,7 @@ const AdminPanel: React.FC = () => {
                                         />
                                     </div>
                                     {medSearchTerm && (
-                                        <div className="mt-2 bg-white border border-gray-100 rounded-2xl shadow-xl p-2 space-y-1">
+                                        <div className="mt-2 bg-white border border-gray-100 rounded-2xl shadow-xl p-2 max-h-60 overflow-y-auto">
                                             {filteredMeds.map(m => (
                                                 <button
                                                     key={m.id}
@@ -560,13 +573,11 @@ const AdminPanel: React.FC = () => {
                                                     className={`w-full text-left p-4 rounded-xl flex items-center justify-between transition-colors ${selectedMed === m.id ? 'bg-orange-500 text-white' : 'hover:bg-gray-50'}`}
                                                 >
                                                     <div className="flex flex-col">
-                                                        <span className={`text-sm font-black ${selectedMed === m.id ? 'text-white' : 'text-gray-900'}`}>{m.descripcion}</span>
-                                                        <span className={`text-[10px] font-bold ${selectedMed === m.id ? 'text-orange-100' : 'text-gray-400'}`}>PLU: {m.plu} | Cód: {m.codigoGenerico}</span>
+                                                        <span className="text-sm font-black">{m.descripcion}</span>
+                                                        <span className="text-[10px] font-bold opacity-70">PLU: {m.plu} | Sede: {usuarios.find(u => u.id === m.idUsuario)?.sede || 'N/A'}</span>
                                                     </div>
-                                                    <IconChevronRight size={16} opacity={0.5} />
                                                 </button>
                                             ))}
-                                            {filteredMeds.length === 0 && <p className="p-4 text-center text-gray-400 font-bold text-xs uppercase tracking-widest">No se encontraron resultados</p>}
                                         </div>
                                     )}
                                 </div>
@@ -584,7 +595,7 @@ const AdminPanel: React.FC = () => {
                                 <button
                                     onClick={handleCreateAssignment}
                                     disabled={loading}
-                                    className="w-full py-5 bg-gray-900 text-white rounded-[2rem] font-black text-lg uppercase tracking-widest shadow-2xl shadow-gray-200 hover:bg-orange-600 transition-all active:scale-95 flex items-center justify-center gap-3 mt-4 disabled:opacity-50"
+                                    className="w-full py-5 bg-gray-900 text-white rounded-[2rem] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 mt-4 disabled:opacity-50"
                                 >
                                     {loading ? 'Procesando...' : <><IconCalendarPlus size={24} /> Confirmar Asignación</>}
                                 </button>
@@ -601,58 +612,34 @@ const AdminPanel: React.FC = () => {
                                     <IconFileSpreadsheet size={48} />
                                 </div>
                                 <h3 className="text-3xl font-black text-gray-900 uppercase tracking-tight">Generación de Informes</h3>
-                                <p className="text-gray-400 font-bold text-xs uppercase tracking-[0.2em] mt-2 italic">Filtra la información por fechas o usuarios para descargar el reporte detallado.</p>
+                                <p className="text-gray-400 font-bold text-xs uppercase tracking-widest mt-2 italic">Descarga el reporte detallado de los conteos realizados.</p>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-50/50 p-8 rounded-[2.5rem] border border-gray-100">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-gray-50 p-8 rounded-[2.5rem]">
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Desde</label>
-                                    <input
-                                        type="date"
-                                        value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
-                                        className="w-full p-4 bg-white rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 shadow-sm"
-                                    />
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Desde</label>
+                                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full p-4 bg-white rounded-2xl border-none shadow-sm font-bold" />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Hasta</label>
-                                    <input
-                                        type="date"
-                                        value={endDate}
-                                        onChange={(e) => setEndDate(e.target.value)}
-                                        className="w-full p-4 bg-white rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 shadow-sm"
-                                    />
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Hasta</label>
+                                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full p-4 bg-white rounded-2xl border-none shadow-sm font-bold" />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Usuario / Sede</label>
-                                    <select
-                                        value={filterUser}
-                                        onChange={(e) => setFilterUser(e.target.value ? Number(e.target.value) : '')}
-                                        className="w-full p-4 bg-white rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 shadow-sm appearance-none cursor-pointer"
-                                    >
-                                        <option value="">TODOS LOS USUARIOS</option>
-                                        {usuarios.map(u => (
-                                            <option key={u.id} value={u.id}>{u.usuario.toUpperCase()} ({u.sede || 'Global'})</option>
-                                        ))}
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sede</label>
+                                    <select value={filterUser} onChange={e => setFilterUser(e.target.value ? Number(e.target.value) : '')} className="w-full p-4 bg-white rounded-2xl border-none shadow-sm font-bold">
+                                        <option value="">TODAS</option>
+                                        {usuarios.map(u => <option key={u.id} value={u.id}>{u.usuario.toUpperCase()} ({u.sede})</option>)}
                                     </select>
                                 </div>
                             </div>
 
                             <div className="flex flex-col items-center gap-6">
-                                <button
-                                    onClick={downloadReport}
-                                    className="px-12 py-6 bg-green-500 text-white rounded-[2rem] font-black text-lg uppercase tracking-widest shadow-2xl shadow-green-500/20 hover:bg-green-600 transition-all active:scale-95 flex items-center gap-4 group"
-                                >
-                                    <IconDownload size={28} className="group-hover:translate-y-1 transition-transform" />
-                                    Descargar Informe
+                                <button onClick={downloadReport} className="px-12 py-6 bg-green-500 text-white rounded-[2rem] font-black uppercase tracking-widest shadow-xl flex items-center gap-4 hover:bg-green-600 transition-all">
+                                    <IconDownload size={28} /> Descargar Informe (.xlsx)
                                 </button>
-
-                                <div className="flex items-center gap-8 py-6 border-t border-gray-100 w-full justify-center">
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-1">Total Registros</p>
-                                        <p className="text-xl font-black text-gray-900">{detalles.length}</p>
-                                    </div>
-                                    <div className="w-px h-8 bg-gray-100"></div>
+                                <div className="text-center">
+                                    <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Total Registros Filtrados</p>
+                                    <p className="text-xl font-black text-gray-900">{detalles.length}</p>
                                 </div>
                             </div>
                         </div>
@@ -661,82 +648,29 @@ const AdminPanel: React.FC = () => {
 
                 {activeTab === 'importar' && (
                     <div className="p-4 sm:p-12">
-                        <div className="max-w-4xl mx-auto">
-                            <div className="text-center mb-12">
-                                <div className="inline-flex p-5 bg-blue-50 text-blue-500 rounded-[2rem] mb-6">
-                                    <IconDatabaseImport size={56} />
-                                </div>
-                                <h3 className="text-3xl font-black text-gray-900 uppercase tracking-tight">Sincronización de Datos Maestra</h3>
-                                <p className="text-gray-400 font-bold text-sm uppercase tracking-widest mt-2 italic">Carga tus archivos Excel para actualizar el catálogo e inventario global.</p>
+                        <div className="max-w-4xl mx-auto text-center">
+                            <div className="inline-flex p-5 bg-blue-50 text-blue-500 rounded-[2rem] mb-6">
+                                <IconDatabaseImport size={56} />
                             </div>
+                            <h3 className="text-3xl font-black text-gray-900 uppercase mb-4">Cargue de reporte de inventario</h3>
+                            <p className="text-gray-400 font-bold text-sm uppercase mb-12 italic">Actualiza el inventario global de la red desde un archivo Excel.</p>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                {/* Importar Catálogo */}
-                                <div className="bg-gray-50/50 rounded-[2.5rem] p-10 border-2 border-dashed border-gray-200 hover:border-blue-400 transition-all group relative overflow-hidden">
-                                    <div className="relative z-10 flex flex-col items-center text-center">
-                                        <div className="w-16 h-16 bg-blue-500 text-white rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                                            <IconFilePlus size={32} />
-                                        </div>
-                                        <h4 className="text-xl font-black text-gray-900 uppercase mb-3">Catálogo Base</h4>
-                                        <p className="text-xs text-gray-400 font-bold leading-relaxed mb-8 uppercase tracking-tighter">Sincroniza descripciones, códigos genéricos y laboratorios vía PLU.</p>
+                            <div className="flex justify-center">
+                                <div className="max-w-md bg-gray-50 rounded-[2.5rem] p-10 border-2 border-dashed border-gray-200 hover:border-blue-400 transition-all group flex flex-col items-center">
+                                    <IconFilePlus size={48} className="text-blue-500 mb-6" />
+                                    <h4 className="text-xl font-black text-gray-900 uppercase mb-3">Reporte de inventario</h4>
+                                    <p className="text-xs text-gray-400 font-bold uppercase mb-8">Sincroniza saldos vía PLU y código de sede.</p>
 
-                                        <label className="w-full">
-                                            <input
-                                                type="file"
-                                                accept=".xlsx, .xls"
-                                                className="hidden"
-                                                onChange={(e) => handleExcelImport(e, 'medicamento')}
-                                            />
-                                            <div className="bg-gray-900 text-white py-4 px-8 rounded-2xl font-black text-xs uppercase tracking-widest cursor-pointer hover:bg-blue-600 transition-colors shadow-lg active:scale-95">
-                                                Seleccionar Excel
-                                            </div>
-                                        </label>
-                                        <button 
-                                            onClick={() => downloadTemplate('medicamento')}
-                                            className="mt-6 flex items-center gap-2 text-blue-500 font-black text-[10px] uppercase tracking-[0.2em] hover:text-blue-700 transition-all"
-                                        >
-                                            <IconDownload size={16} /> Descargar Plantilla
-                                        </button>
-                                    </div>
-                                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                                        <IconFileSpreadsheet size={120} />
-                                    </div>
-                                </div>
+                                    <label className="w-full cursor-pointer">
+                                        <input type="file" accept=".xlsx, .xls" className="hidden" onChange={e => handleExcelImport(e, 'medicamento')} />
+                                        <div className="bg-gray-900 text-white py-4 px-8 rounded-2xl font-black uppercase tracking-widest hover:bg-blue-600 transition-colors">Seleccionar Archivo</div>
+                                    </label>
 
-                                {/* Importar Inventario */}
-                                <div className="bg-gray-50/50 rounded-[2.5rem] p-10 border-2 border-dashed border-gray-200 hover:border-green-400 transition-all group relative overflow-hidden">
-                                    <div className="relative z-10 flex flex-col items-center text-center">
-                                        <div className="w-16 h-16 bg-green-500 text-white rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-green-500/20 group-hover:scale-110 transition-transform">
-                                            <IconDownload size={32} />
-                                        </div>
-                                        <h4 className="text-xl font-black text-gray-900 uppercase mb-3">Saldos de Inventario</h4>
-                                        <p className="text-xs text-gray-400 font-bold leading-relaxed mb-8 uppercase tracking-tighter">Cruza los saldos actuales con usuarios y sedes automáticamente.</p>
-
-                                        <label className="w-full">
-                                            <input
-                                                type="file"
-                                                accept=".xlsx, .xls"
-                                                className="hidden"
-                                                onChange={(e) => handleExcelImport(e, 'inventario')}
-                                            />
-                                            <div className="bg-gray-900 text-white py-4 px-8 rounded-2xl font-black text-xs uppercase tracking-widest cursor-pointer hover:bg-green-600 transition-colors shadow-lg active:scale-95">
-                                                Seleccionar Excel
-                                            </div>
-                                        </label>
-                                        <button 
-                                            onClick={() => downloadTemplate('inventario')}
-                                            className="mt-6 flex items-center gap-2 text-green-500 font-black text-[10px] uppercase tracking-[0.2em] hover:text-green-700 transition-all"
-                                        >
-                                            <IconDownload size={16} /> Descargar Plantilla
-                                        </button>
-                                    </div>
-                                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                                        <IconFileSpreadsheet size={120} />
-                                    </div>
+                                    <button onClick={() => downloadTemplate('medicamento')} className="mt-6 flex items-center gap-2 text-blue-500 font-black text-[10px] uppercase">
+                                        <IconDownload size={16} /> Descargar Formato
+                                    </button>
                                 </div>
                             </div>
-
-
                         </div>
                     </div>
                 )}

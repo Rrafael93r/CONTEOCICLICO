@@ -14,8 +14,66 @@ public class MedicamentoService {
     @Autowired
     private MedicamentoRepository medicamentoRepository;
 
+    @Autowired
+    private com.pharmaser.conteociclico.repository.UsuarioRepository usuarioRepository;
+
     public List<Medicamento> getAllMedicamentos() {
         return medicamentoRepository.findAll();
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void bulkUpdateInventory(List<java.util.Map<String, Object>> items) {
+        System.out.println("Iniciando ACTUALIZACIÓN directa de saldos en catálogo...");
+        
+        // 1. Cargamos usuarios para normalizar sedes
+        List<com.pharmaser.conteociclico.model.Usuario> usuarios = usuarioRepository.findAll();
+        java.util.Map<String, Integer> sedeToIdMap = new java.util.HashMap<>();
+        for (com.pharmaser.conteociclico.model.Usuario u : usuarios) {
+            if (u.getSede() != null) {
+                try {
+                    String norm = String.valueOf(Integer.parseInt(u.getSede().trim()));
+                    sedeToIdMap.put(norm, u.getId());
+                } catch (Exception e) {
+                    sedeToIdMap.put(u.getSede().trim(), u.getId());
+                }
+            }
+        }
+
+        // 2. Cargamos catálogo actual
+        List<Medicamento> currentCatalog = medicamentoRepository.findAll();
+        java.util.Map<String, Medicamento> medMap = new java.util.HashMap<>();
+        for (Medicamento m : currentCatalog) {
+            if (m.getPlu() != null && m.getIdUsuario() != null) {
+                medMap.put(m.getPlu() + "_" + m.getIdUsuario(), m);
+            }
+        }
+
+        java.util.List<Medicamento> toUpdate = new java.util.ArrayList<>();
+
+        for (java.util.Map<String, Object> item : items) {
+            String plu = (String) item.get("plu");
+            String sede = (String) item.get("sede");
+            Integer cantidad = (Integer) item.get("cantidad");
+
+            if (plu == null || sede == null) continue;
+
+            // Normalización de sede
+            String normSede;
+            try { normSede = String.valueOf(Integer.parseInt(sede.trim())); }
+            catch (Exception e) { normSede = sede.trim(); }
+            
+            Integer idUsuario = sedeToIdMap.get(normSede);
+            if (idUsuario == null) continue;
+
+            Medicamento med = medMap.get(plu + "_" + idUsuario);
+            if (med != null) {
+                med.setInventario(cantidad != null ? cantidad : 0);
+                toUpdate.add(med);
+            }
+        }
+        
+        medicamentoRepository.saveAll(toUpdate);
+        System.out.println("Saldos actualizados directamente en catálogo: " + toUpdate.size() + " registros.");
     }
 
     @org.springframework.transaction.annotation.Transactional
@@ -72,6 +130,20 @@ public class MedicamentoService {
 
     public Medicamento saveMedicamento(Medicamento medicamento) {
         return medicamentoRepository.save(medicamento);
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void resetStatusByUsuario(Integer idUsuario) {
+        List<Medicamento> medications = medicamentoRepository.findAll();
+        List<Medicamento> toUpdate = new java.util.ArrayList<>();
+        for (Medicamento m : medications) {
+            if (m.getIdUsuario().equals(idUsuario) && "sí".equals(m.getEstadoDelConteo())) {
+                m.setEstadoDelConteo("no");
+                toUpdate.add(m);
+            }
+        }
+        medicamentoRepository.saveAll(toUpdate);
+        System.out.println("Ciclo reiniciado para usuario " + idUsuario + ". Se resetearon " + toUpdate.size() + " medicamentos.");
     }
 
     public void deleteMedicamento(Integer id) {

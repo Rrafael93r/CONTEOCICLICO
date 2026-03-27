@@ -40,3 +40,20 @@ export const bulkImportMedicamentos = async (items: any[]) => {
         throw error;
     }
 };
+export const bulkUpdateInventory = async (items: any[]) => {
+    try {
+        const response = await axios.post(`${API_URL}/bulk-inventory`, items);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const resetCycleByUsuario = async (idUsuario: number) => {
+    try {
+        const response = await axios.post(`${API_URL}/reset-cycle/${idUsuario}`);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};

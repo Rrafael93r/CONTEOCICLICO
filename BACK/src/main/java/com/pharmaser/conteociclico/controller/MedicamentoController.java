@@ -26,6 +26,12 @@ public class MedicamentoController {
         return ResponseEntity.ok("Catálogo actualizado exitosamente");
     }
 
+    @PostMapping("/bulk-inventory")
+    public ResponseEntity<String> bulkInventory(@RequestBody List<java.util.Map<String, Object>> items) {
+        medicamentoService.bulkUpdateInventory(items);
+        return ResponseEntity.ok("Saldos actualizados exitosamente");
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<Medicamento> getById(@PathVariable Integer id) {
         return medicamentoService.getMedicamentoById(id)
@@ -42,6 +48,12 @@ public class MedicamentoController {
     public Medicamento update(@PathVariable Integer id, @RequestBody Medicamento medicamento) {
         medicamento.setId(id);
         return medicamentoService.saveMedicamento(medicamento);
+    }
+
+    @PostMapping("/reset-cycle/{idUsuario}")
+    public ResponseEntity<String> resetCycle(@PathVariable Integer idUsuario) {
+        medicamentoService.resetStatusByUsuario(idUsuario);
+        return ResponseEntity.ok("Ciclo reiniciado correctamente para el usuario " + idUsuario);
     }
 
     @DeleteMapping("/{id}")

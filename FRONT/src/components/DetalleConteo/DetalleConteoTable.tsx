@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { getAllMedicamentos, updateMedicamento, Medicamento } from '../../servicios/medicamentoService';
 import { createDetalle, getAllDetalles, updateDetalle, DetalleConteo } from '../../servicios/detalleConteoService';
 import { getAllPersonalizados } from '../../servicios/personalizadoService';
-import { getAllInventario } from '../../servicios/inventarioService';
 import { getCurrentUser } from '../../servicios/authServices';
 import Swal from 'sweetalert2';
 import {
@@ -31,6 +30,7 @@ const DetalleConteoTable: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [isFetching, setIsFetching] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const fetchingRef = React.useRef(false);
 
     const normalizeDate = (date: any): string => {
         if (!date) return '';
@@ -43,8 +43,8 @@ const DetalleConteoTable: React.FC = () => {
     };
 
     const fetchData = async () => {
-        if (isFetching) return;
-        setIsFetching(true);
+        if (fetchingRef.current) return;
+        fetchingRef.current = true;
         setLoading(true);
         try {
             const currentUser = getCurrentUser();
@@ -60,7 +60,6 @@ const DetalleConteoTable: React.FC = () => {
             
             let rawPersonalizados = await getAllPersonalizados(currentUser.id, fechaHoy);
             const hoyPersonalizados = rawPersonalizados.filter(p => normalizeDate(p.fechaProgramacion) === fechaHoy);
-            const inventarioData = await getAllInventario();
 
             // 1. PROCESAR PERSONALIZADOS (SIN DUPLICADOS)
             for (const p of hoyPersonalizados) {
@@ -72,10 +71,8 @@ const DetalleConteoTable: React.FC = () => {
                 );
 
                 if (!yaEnDetalle) {
-                    const invItem = inventarioData.find(inv => 
-                        Number(inv.idMedicamento) === Number(pId) && Number(inv.idUsuario) === Number(currentUser.id)
-                    );
-                    const cantAct = invItem ? invItem.cantidadActual : 0;
+                    const medInfo = p.medicamento || allMedsForLookup.find(m => Number(m.id) === Number(pId));
+                    const cantAct = medInfo?.inventario || 0;
 
                     const newDetalle = await createDetalle({
                         idMedicamento: pId,
@@ -86,8 +83,6 @@ const DetalleConteoTable: React.FC = () => {
                         horaRegistro: null,
                         tipoConteo: 'Personalizado'
                     });
-
-                    const medInfo = p.medicamento || allMedsForLookup.find(m => Number(m.id) === Number(pId));
 
                     if (medInfo) {
                         await updateMedicamento(medInfo.id, { ...medInfo, estadoDelConteo: 'sí' });
@@ -136,18 +131,12 @@ const DetalleConteoTable: React.FC = () => {
 
                         for (const med of sortedMeds) {
                             if (uniqueProductCodes.includes(med.codigoGenerico)) {
-                                const hasInv = inventarioData.some(inv => 
-                                    Number(inv.idMedicamento) === Number(med.id) && Number(inv.idUsuario) === Number(currentUser.id)
-                                );
-                                if (hasInv) selectedMeds.push(med);
+                                if (med.inventario > 0) selectedMeds.push(med);
                                 continue;
                             }
 
                             if (uniqueProductCodes.length < quota) {
-                                const hasInv = inventarioData.some(inv => 
-                                    Number(inv.idMedicamento) === Number(med.id) && Number(inv.idUsuario) === Number(currentUser.id)
-                                );
-                                if (hasInv) {
+                                if (med.inventario > 0) {
                                     uniqueProductCodes.push(med.codigoGenerico);
                                     selectedMeds.push(med);
                                 }
@@ -158,10 +147,7 @@ const DetalleConteoTable: React.FC = () => {
 
                         if (selectedMeds.length > 0) {
                             await Promise.all(selectedMeds.map(async (m) => {
-                                const invItem = inventarioData.find(inv => 
-                                    Number(inv.idMedicamento) === Number(m.id) && Number(inv.idUsuario) === Number(currentUser.id)
-                                );
-                                const cantAct = invItem ? invItem.cantidadActual : 0;
+                                const cantAct = m.inventario || 0;
                                 await createDetalle({
                                     idMedicamento: m.id,
                                     idUsuario: currentUser.id,
@@ -194,7 +180,7 @@ const DetalleConteoTable: React.FC = () => {
             });
         } finally {
             setLoading(false);
-            setIsFetching(false);
+            fetchingRef.current = false;
         }
     };
 
