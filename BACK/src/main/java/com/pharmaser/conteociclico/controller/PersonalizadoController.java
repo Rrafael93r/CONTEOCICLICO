@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/personalizado")
@@ -17,13 +18,14 @@ public class PersonalizadoController {
     @GetMapping
     public List<Personalizado> getAll(@RequestParam(required = false) Integer idUsuario,
                                      @RequestParam(required = false) String fechaProgramacion) {
-        if (idUsuario != null && fechaProgramacion != null) {
-            return personalizadoService.getPersonalizadosByUsuarioYFechaProgramacion(idUsuario, java.time.LocalDate.parse(fechaProgramacion));
-        }
+        
+        LocalDate date = (fechaProgramacion != null) ? java.time.LocalDate.parse(fechaProgramacion) : java.time.LocalDate.now();
+        
         if (idUsuario != null) {
-            return personalizadoService.getPersonalizadosByUsuario(idUsuario);
+            return personalizadoService.getPersonalizadosByUsuarioYFechaProgramacion(idUsuario, date);
         }
-        return personalizadoService.getAllPersonalizados();
+        
+        return personalizadoService.getPersonalizadosByFechaProgramacion(date);
     }
 
     @PostMapping

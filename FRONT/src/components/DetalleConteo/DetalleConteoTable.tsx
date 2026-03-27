@@ -29,26 +29,52 @@ const Toast = Swal.mixin({
 const DetalleConteoTable: React.FC = () => {
     const [detalles, setDetalles] = useState<DetalleConteoEditable[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isFetching, setIsFetching] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
 
+    const normalizeDate = (date: any): string => {
+        if (!date) return '';
+        if (Array.isArray(date)) {
+            const [y, m, d] = date;
+            return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        }
+        if (typeof date === 'string') return date.split('T')[0];
+        return String(date);
+    };
+
     const fetchData = async () => {
+        if (isFetching) return;
+        setIsFetching(true);
         setLoading(true);
         try {
             const currentUser = getCurrentUser();
             if (!currentUser) return;
 
-            const fechaHoy = new Date().toLocaleDateString('en-CA');
+            const now = new Date();
+            const fechaHoy = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
             const allMedsForLookup = await getAllMedicamentos();
-            let hoyUserDetalles = await getAllDetalles(currentUser.id, fechaHoy);
-            const hoyPersonalizados = await getAllPersonalizados(currentUser.id, fechaHoy);
+            
+            // Filtro local estricto adicional al remoto
+            let rawDetalles = await getAllDetalles(currentUser.id, fechaHoy);
+            let hoyUserDetalles = rawDetalles.filter(d => normalizeDate(d.fechaRegistro) === fechaHoy);
+            
+            let rawPersonalizados = await getAllPersonalizados(currentUser.id, fechaHoy);
+            const hoyPersonalizados = rawPersonalizados.filter(p => normalizeDate(p.fechaProgramacion) === fechaHoy);
             const inventarioData = await getAllInventario();
 
+            // 1. PROCESAR PERSONALIZADOS (SIN DUPLICADOS)
             for (const p of hoyPersonalizados) {
                 const pId = p.idMedicamento || p.medicamento?.id;
-                const yaEnDetalle = hoyUserDetalles.some(d => (d.idMedicamento || d.medicamento?.id) === pId);
+                if (!pId) continue;
 
-                if (!yaEnDetalle && pId) {
-                    const invItem = inventarioData.find(inv => inv.idMedicamento === pId && inv.idUsuario === currentUser.id);
+                const yaEnDetalle = hoyUserDetalles.some(d => 
+                    Number(d.idMedicamento || d.medicamento?.id) === Number(pId)
+                );
+
+                if (!yaEnDetalle) {
+                    const invItem = inventarioData.find(inv => 
+                        Number(inv.idMedicamento) === Number(pId) && Number(inv.idUsuario) === Number(currentUser.id)
+                    );
                     const cantAct = invItem ? invItem.cantidadActual : 0;
 
                     const newDetalle = await createDetalle({
@@ -61,7 +87,11 @@ const DetalleConteoTable: React.FC = () => {
                         tipoConteo: 'Personalizado'
                     });
 
-                    const medInfo = p.medicamento || allMedsForLookup.find(m => m.id === pId);
+                    const medInfo = p.medicamento || allMedsForLookup.find(m => Number(m.id) === Number(pId));
+
+                    if (medInfo) {
+                        await updateMedicamento(medInfo.id, { ...medInfo, estadoDelConteo: 'sí' });
+                    }
 
                     hoyUserDetalles.push({
                         ...newDetalle,
@@ -70,6 +100,7 @@ const DetalleConteoTable: React.FC = () => {
                 }
             }
 
+            // 2. VINCULAR INFORMACIÓN DE MEDICAMENTOS FALTANTE
             hoyUserDetalles = hoyUserDetalles.map(d => {
                 const medId = d.idMedicamento || d.medicamento?.id;
                 if ((!d.medicamento || !d.medicamento.descripcion) && medId) {
@@ -79,104 +110,92 @@ const DetalleConteoTable: React.FC = () => {
                 return d;
             });
 
-            const hasCiclico = hoyUserDetalles.some(d => d.tipoConteo === 'Cíclico');
+            // 3. GENERAR TAREA CÍCLICA SI ES LA PRIMERA VEZ DE HOY
+            const isFirstLoadOfToday = !hoyUserDetalles.some(d => d.tipoConteo === 'Cíclico');
 
-            if (hasCiclico) {
-                const prepared: DetalleConteoEditable[] = hoyUserDetalles.map(d => ({
-                    ...d,
-                    inputValue: d.cantidadContada !== null ? d.cantidadContada : ''
-                }));
-                setDetalles(prepared);
-                setLoading(false);
-                return;
-            }
+            if (isFirstLoadOfToday) {
+                const quota = currentUser.numeroConteo !== undefined ? currentUser.numeroConteo : 10;
+                if (quota > 0) {
+                    // EXCLUIR MEDICAMENTOS QUE YA ESTÁN EN LA TABLA DE HOY (COMO PERSONALIZADOS)
+                    const currentIdsInTable = hoyUserDetalles.map(d => Number(d.idMedicamento || d.medicamento?.id));
 
-            const quota = currentUser.numeroConteo !== undefined ? currentUser.numeroConteo : 10;
+                    const pendingMeds = allMedsForLookup.filter(m =>
+                        m.idUsuario === currentUser.id && 
+                        m.estadoDelConteo?.toLowerCase() === 'no' &&
+                        !currentIdsInTable.includes(Number(m.id))
+                    );
 
-            if (quota <= 0) {
-                const prepared: DetalleConteoEditable[] = hoyUserDetalles.map(d => ({
-                    ...d,
-                    inputValue: d.cantidadContada !== null ? d.cantidadContada : ''
-                }));
-                setDetalles(prepared);
-                setLoading(false);
-                return;
-            }
+                    if (pendingMeds.length > 0) {
+                        // PRIORIDAD: Los medicamentos con mayor COSTO TOTAL de primero
+                        const sortedMeds = [...pendingMeds].sort((a, b) => 
+                            (b.costoTotal || 0) - (a.costoTotal || 0)
+                        );
 
-            const pendingMeds = allMedsForLookup.filter(m =>
-                m.idUsuario === currentUser.id && m.estadoDelConteo?.toLowerCase() === 'no'
-            );
+                        const uniqueProductCodes: string[] = [];
+                        const selectedMeds: Medicamento[] = [];
 
-            const sortedMeds = [...pendingMeds].sort((a, b) =>
-                a.codigoGenerico.localeCompare(b.codigoGenerico, undefined, { numeric: true, sensitivity: 'base' })
-            );
+                        for (const med of sortedMeds) {
+                            if (uniqueProductCodes.includes(med.codigoGenerico)) {
+                                const hasInv = inventarioData.some(inv => 
+                                    Number(inv.idMedicamento) === Number(med.id) && Number(inv.idUsuario) === Number(currentUser.id)
+                                );
+                                if (hasInv) selectedMeds.push(med);
+                                continue;
+                            }
 
-            const uniqueProductCodes: string[] = [];
-            const selectedMeds: Medicamento[] = [];
+                            if (uniqueProductCodes.length < quota) {
+                                const hasInv = inventarioData.some(inv => 
+                                    Number(inv.idMedicamento) === Number(med.id) && Number(inv.idUsuario) === Number(currentUser.id)
+                                );
+                                if (hasInv) {
+                                    uniqueProductCodes.push(med.codigoGenerico);
+                                    selectedMeds.push(med);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
 
-            for (const med of sortedMeds) {
-                if (uniqueProductCodes.includes(med.codigoGenerico)) {
-                    const hasInv = inventarioData.some(inv => inv.idMedicamento === med.id && inv.idUsuario === currentUser.id);
-                    if (hasInv) selectedMeds.push(med);
-                    continue;
-                }
-
-                if (uniqueProductCodes.length < quota) {
-                    const hasInv = inventarioData.some(inv => inv.idMedicamento === med.id && inv.idUsuario === currentUser.id);
-                    if (hasInv) {
-                        uniqueProductCodes.push(med.codigoGenerico);
-                        selectedMeds.push(med);
+                        if (selectedMeds.length > 0) {
+                            await Promise.all(selectedMeds.map(async (m) => {
+                                const invItem = inventarioData.find(inv => 
+                                    Number(inv.idMedicamento) === Number(m.id) && Number(inv.idUsuario) === Number(currentUser.id)
+                                );
+                                const cantAct = invItem ? invItem.cantidadActual : 0;
+                                await createDetalle({
+                                    idMedicamento: m.id,
+                                    idUsuario: currentUser.id,
+                                    cantidadContada: null,
+                                    cantidadActual: cantAct,
+                                    fechaRegistro: fechaHoy,
+                                    horaRegistro: null,
+                                    tipoConteo: 'Cíclico'
+                                });
+                                await updateMedicamento(m.id, { ...m, estadoDelConteo: 'sí' });
+                            }));
+                            
+                            const updatedRaw = await getAllDetalles(currentUser.id, fechaHoy);
+                            hoyUserDetalles = updatedRaw.filter(d => normalizeDate(d.fechaRegistro) === fechaHoy);
+                        }
                     }
-                } else {
-                    break;
                 }
             }
 
-            const createdDetalles: DetalleConteoEditable[] = [];
-            await Promise.all(selectedMeds.map(async (m) => {
-                const invItem = inventarioData.find(inv => inv.idMedicamento === m.id && inv.idUsuario === currentUser.id);
-                const cantAct = invItem ? invItem.cantidadActual : 0;
-
-                const newDetalle = await createDetalle({
-                    idMedicamento: m.id,
-                    idUsuario: currentUser.id,
-                    cantidadContada: null,
-                    cantidadActual: cantAct,
-                    fechaRegistro: fechaHoy,
-                    horaRegistro: null,
-                    tipoConteo: 'Cíclico'
-                });
-
-                await updateMedicamento(m.id, { ...m, estadoDelConteo: 'sí' });
-
-                createdDetalles.push({
-                    ...newDetalle,
-                    medicamento: m,
-                    inputValue: '' as number | ''
-                });
-            }));
-
-            const finalDetalles = [
-                ...hoyUserDetalles.map(d => ({ ...d, inputValue: d.cantidadContada !== null ? d.cantidadContada : '' })),
-                ...createdDetalles
-            ];
-
-            setDetalles(finalDetalles as DetalleConteoEditable[]);
+            setDetalles(hoyUserDetalles.map(d => ({
+                ...d,
+                inputValue: d.cantidadContada !== null ? d.cantidadContada : ''
+            })));
 
         } catch (error) {
             Swal.fire({
                 icon: 'error',
-                title: 'Error de Asignación',
-                text: 'Ocurrió un error al asignar los medicamentos de hoy.',
-                confirmButtonColor: '#d33'
+                title: 'Error de carga',
+                text: 'No se pudieron procesar los medicamentos de hoy.'
             });
         } finally {
             setLoading(false);
+            setIsFetching(false);
         }
-    };
-
-    const handleAssignBatch = () => {
-        fetchData();
     };
 
     useEffect(() => {
@@ -231,13 +250,16 @@ const DetalleConteoTable: React.FC = () => {
         }
     };
 
-    const filteredDetalles = detalles.filter(d =>
-        d.cantidadContada === null && (
+    const filteredDetalles = detalles.filter(d => {
+        const now = new Date();
+        const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
+        
+        return normalizeDate(d.fechaRegistro) === today && d.cantidadContada === null && (
             (d.medicamento?.descripcion.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
             (d.medicamento?.plu || '').includes(searchTerm) ||
             (d.medicamento?.codigoGenerico.toLowerCase() || '').includes(searchTerm.toLowerCase())
-        )
-    );
+        );
+    });
 
     if (loading && detalles.length === 0) return (
         <div className="p-20 text-center">
@@ -290,7 +312,10 @@ const DetalleConteoTable: React.FC = () => {
                                             </div>
                                             <div>
                                                 <div className="font-black text-gray-900 text-sm uppercase tracking-tight leading-tight">{d.medicamento?.descripcion}</div>
-                                                <div className="text-[10px] font-bold text-gray-400 tracking-widest uppercase mt-1">PLU: {d.medicamento?.plu}</div>
+                                                <div className="flex flex-col gap-0.5 mt-1">
+                                                    <div className="text-[10px] font-bold text-gray-400 tracking-widest uppercase">PLU: {d.medicamento?.plu}</div>
+                                                    <div className="text-[10px] font-black text-orange-400 tracking-widest uppercase italic">Programado: {normalizeDate(d.fechaRegistro)}</div>
+                                                </div>
                                             </div>
                                         </div>
                                     </td>
@@ -336,8 +361,8 @@ const DetalleConteoTable: React.FC = () => {
                                 <h4 className="text-base font-black text-gray-900 leading-tight mb-2 uppercase">{d.medicamento?.descripcion}</h4>
                                 <div className="flex flex-wrap gap-2 items-center">
                                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded-lg">PLU: {d.medicamento?.plu}</span>
-                                    {/* Ya no mostramos el saldo en sistema aquí tampoco si al usuario no le interesa */}
                                     <span className="text-[10px] font-black text-orange-500 bg-orange-50 px-2 py-1 rounded-lg uppercase border border-orange-100">CÓD: {d.medicamento?.codigoGenerico}</span>
+                                    <span className="text-[9px] font-bold text-gray-400 italic">Asignado: {normalizeDate(d.fechaRegistro)}</span>
                                 </div>
                             </div>
                             <div className="ml-4">

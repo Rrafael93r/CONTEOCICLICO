@@ -8,4 +8,5 @@ import java.util.List;
 public interface PersonalizadoRepository extends JpaRepository<Personalizado, Integer> {
     List<Personalizado> findByIdUsuario(Integer idUsuario);
     List<Personalizado> findByIdUsuarioAndFechaProgramacion(Integer idUsuario, java.time.LocalDate fechaProgramacion);
+    List<Personalizado> findByFechaProgramacion(java.time.LocalDate fechaProgramacion);
 }

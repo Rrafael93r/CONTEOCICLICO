@@ -5,6 +5,7 @@ import { createPersonalizado } from '../../servicios/personalizadoService';
 import { getAllDetalles, DetalleConteo } from '../../servicios/detalleConteoService';
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
+import axios from '../../servicios/axiosConfig';
 import {
     IconUsers,
     IconMedicineSyrup,
@@ -60,7 +61,7 @@ const AdminPanel: React.FC = () => {
                 setMedicamentos(mData);
             }
             else if (activeTab === 'reportes') {
-                const data = await getAllDetalles();
+                const data = await getAllDetalles(undefined, undefined, startDate, endDate);
                 setDetalles(data);
             }
         } catch (error) {
@@ -178,9 +179,40 @@ const AdminPanel: React.FC = () => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        setLoading(true);
-        const reader = new FileReader();
+        const controller = new AbortController();
+        
+        Swal.fire({
+            title: '<span class="text-2xl font-black text-gray-900 uppercase italic">Procesando Datos</span>',
+            html: `
+                <div class="py-10">
+                    <div class="w-20 h-20 border-8 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-6 shadow-2xl shadow-orange-500/20"></div>
+                    <p class="text-gray-500 font-bold uppercase tracking-widest text-xs animate-pulse">Sincronización por Código de Sede...</p>
+                    <p class="text-gray-400 text-[10px] mt-2 italic px-8">Estamos vinculando los registros usando el número único de sede para máxima precisión.</p>
+                </div>
+            `,
+            allowOutsideClick: false,
+            showCancelButton: true,
+            cancelButtonText: 'DETENER OPERACIÓN',
+            confirmButtonColor: '#f6952c',
+            customClass: {
+                popup: 'rounded-[3rem] border-none shadow-2xl overflow-hidden bg-white',
+                cancelButton: 'rounded-2xl font-black text-[10px] uppercase tracking-widest px-6 py-4'
+            },
+            showConfirmButton: false
+        }).then((result) => {
+            if (result.isDismissed && result.dismiss === Swal.DismissReason.cancel) {
+                controller.abort();
+                Swal.fire({
+                    icon: 'info',
+                    title: 'Operación Abortada',
+                    text: 'Se ha cancelado la importación. No se realizaron cambios permanentes.',
+                    confirmButtonColor: '#111827',
+                    customClass: { popup: 'rounded-[2rem]' }
+                });
+            }
+        });
 
+        const reader = new FileReader();
         reader.onload = async (evt) => {
             try {
                 const data = evt.target?.result;
@@ -190,35 +222,120 @@ const AdminPanel: React.FC = () => {
                 const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
                 if (type === 'medicamento') {
-                    const mapped = jsonData.map(row => ({
-                        plu: String(row.PLU || row.plu || ''),
-                        descripcion: row.DESCRIPCION || row.descripcion || row.NOMBRE || '',
-                        codigoGenerico: String(row['CODIGO GENERICO'] || row.codigoGenerico || ''),
-                        laboratorio: row.LABORATORIO || row.laboratorio || ''
-                    })).filter(item => item.plu);
+                    let currentUsers = [...usuarios];
+                    if (currentUsers.length === 0) {
+                        currentUsers = await getAllUsuarios();
+                        setUsuarios(currentUsers);
+                    }
 
-                    await bulkImportMedicamentos(mapped);
-                    Swal.fire('Éxito', `${mapped.length} medicamentos procesados correctamente.`, 'success');
+                    // DIAGNÓSTICO: Ver qué tenemos disponible
+                    console.log("Usuarios en sistema (primeros 5):", currentUsers.slice(0, 5).map(u => ({ id: u.id, sede: u.sede, usuario: u.usuario })));
+                    console.log("Primeros 5 registros Excel:", jsonData.slice(0, 5));
+
+                    const mapped = jsonData.map((row, index) => {
+                        // Capturamos cualquier variante de la columna Sede
+                        const rawSede = row.Sede || row.sede || row.SEDE || row['Sede '] || row['SEDE '];
+                        const sedeCode = String(rawSede || '').trim();
+                        
+                        const foundUser = currentUsers.find(u => {
+                            // 1. Prioridad: Comparación numérica de Sede (Sede 1 == 001)
+                            const uSedeNum = u.sede ? parseInt(String(u.sede).trim(), 10) : NaN;
+                            const rowSedeNum = sedeCode ? parseInt(sedeCode, 10) : NaN;
+                            if (!isNaN(uSedeNum) && !isNaN(rowSedeNum) && uSedeNum === rowSedeNum) return true;
+
+                            // 2. Respaldo: Comparación exacta de Texto
+                            if (u.sede && String(u.sede).toUpperCase() === sedeCode.toUpperCase()) return true;
+
+                            return false;
+                        });
+
+                        if (!foundUser && index < 5) {
+                            console.warn(`No se encontró usuario para Fila ${index + 1}: Sede=[${sedeCode}]`);
+                        }
+
+                        return {
+                            plu: String(row.PLU || row.plu || ''),
+                            descripcion: String(row.Descripcion || row.descripcion || row.DESCRIPCION || ''),
+                            codigoGenerico: String(row.Generico || row.generico || row['CODIGO GENERICO'] || ''),
+                            idUsuario: foundUser?.id,
+                            inventario: parseInt(row.Inventario || row.inventario || '0'),
+                            costo: parseFloat(row.Costo || row.costo || '0'),
+                            costoTotal: parseFloat(row['Costo total'] || row.costoTotal || '0'),
+                            laboratorio: String(row.Laboratorio || row.laboratorio || row.LABORATORIO || 'N/A')
+                        };
+                    }).filter(item => item.plu);
+
+                    if (mapped.some(item => !item.idUsuario)) {
+                        Swal.fire({
+                            icon: 'error',
+                            title: '<span class="text-xl font-black text-red-600 uppercase">Usuarios no encontrados</span>',
+                            text: 'Algunos registros del Excel no pudieron vincularse a un usuario existente. Por favor, revisa los códigos de sede o nombres de punto.',
+                            confirmButtonColor: '#dc2626',
+                            customClass: { popup: 'rounded-[2rem]' }
+                        });
+                        return; // Detener la importación si hay usuarios no encontrados
+                    }
+
+                    console.log("Ejemplo de mapeo final (primer registro):", mapped[0]);
+                    await axios.post('/api/medicamento/bulk', mapped, { signal: controller.signal });
+                    
+                    Swal.fire({
+                        icon: 'success',
+                        title: '<span class="text-xl font-black text-gray-900 uppercase">¡Sincronización Exitosa!</span>',
+                        text: `Se han vinculado ${mapped.length} medicamentos correctamente.`,
+                        confirmButtonColor: '#f6952c',
+                        customClass: { popup: 'rounded-[2rem]' }
+                    });
                 } else {
                     const mapped = jsonData.map(row => ({
-                        sede: String(row.SEDE || row.sede || row.USUARIO || ''),
+                        sede: String(row.SEDE || row.sede || row.USUARIO || row.Punto || ''),
                         plu: String(row.PLU || row.plu || ''),
-                        cantidad: parseInt(row.SALDO || row.saldo || row.CANTIDAD || '0')
+                        cantidad: parseInt(row.SALDO || row.saldo || row.CANTIDAD || row.Inventario || '0')
                     })).filter(item => item.plu && item.sede);
 
-                    await bulkImportInventario(mapped);
-                    Swal.fire('Éxito', `${mapped.length} registros de inventario sincronizados.`, 'success');
+                    await axios.post('/api/inventario/bulk', mapped, { signal: controller.signal });
+                    
+                    Swal.fire({
+                        icon: 'success',
+                        title: '<span class="text-xl font-black text-gray-900 uppercase">¡Inventario Sincronizado!</span>',
+                        text: `Se actualizaron ${mapped.length} saldos en la red.`,
+                        confirmButtonColor: '#f6952c',
+                        customClass: { popup: 'rounded-[2rem]' }
+                    });
                 }
                 loadInitialData();
-            } catch (error) {
-                Swal.fire('Error', 'No se pudo procesar el archivo Excel. Verifica el formato.', 'error');
+            } catch (error: any) {
+                if (error.name === 'CanceledError') return;
+                Swal.fire({
+                    icon: 'error',
+                    title: '<span class="text-xl font-black text-red-600 uppercase">Fallo en Importación</span>',
+                    text: 'El archivo Excel no tiene el formato correcto o la conexión falló.',
+                    confirmButtonColor: '#dc2626',
+                    customClass: { popup: 'rounded-[2rem]' }
+                });
             } finally {
-                setLoading(false);
                 if (e.target) e.target.value = '';
             }
         };
-
         reader.readAsBinaryString(file);
+    };
+
+    const downloadTemplate = (type: 'medicamento' | 'inventario') => {
+        const headers = type === 'medicamento' 
+            ? [['Sede', 'Generico', 'PLU', 'Descripcion', 'Inventario', 'Costo', 'Costo total', 'Laboratorio']]
+            : [['SEDE', 'PLU']];
+            
+        const worksheet = XLSX.utils.aoa_to_sheet(headers);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Plantilla");
+        
+        // Ajustar anchos
+        const wscols = type === 'medicamento' 
+            ? [{wch:10}, {wch:15}, {wch:15}, {wch:40}, {wch:10}, {wch:10}, {wch:15}, {wch:20}]
+            : [{wch:15}, {wch:15}];
+        worksheet['!cols'] = wscols;
+
+        XLSX.writeFile(workbook, `PLANTILLA_${type.toUpperCase()}.xlsx`);
     };
 
     const filteredMeds = medicamentos.filter(m =>
@@ -574,6 +691,12 @@ const AdminPanel: React.FC = () => {
                                                 Seleccionar Excel
                                             </div>
                                         </label>
+                                        <button 
+                                            onClick={() => downloadTemplate('medicamento')}
+                                            className="mt-6 flex items-center gap-2 text-blue-500 font-black text-[10px] uppercase tracking-[0.2em] hover:text-blue-700 transition-all"
+                                        >
+                                            <IconDownload size={16} /> Descargar Plantilla
+                                        </button>
                                     </div>
                                     <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                         <IconFileSpreadsheet size={120} />
@@ -600,6 +723,12 @@ const AdminPanel: React.FC = () => {
                                                 Seleccionar Excel
                                             </div>
                                         </label>
+                                        <button 
+                                            onClick={() => downloadTemplate('inventario')}
+                                            className="mt-6 flex items-center gap-2 text-green-500 font-black text-[10px] uppercase tracking-[0.2em] hover:text-green-700 transition-all"
+                                        >
+                                            <IconDownload size={16} /> Descargar Plantilla
+                                        </button>
                                     </div>
                                     <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                         <IconFileSpreadsheet size={120} />

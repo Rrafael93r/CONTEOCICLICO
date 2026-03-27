@@ -33,4 +33,13 @@ public class Medicamento {
 
     @Column(name = "estadodelconteo")
     private String estadoDelConteo;
+
+    @Column(name = "inventario")
+    private Integer inventario;
+
+    @Column(name = "costo")
+    private Double costo;
+
+    @Column(name = "costototal")
+    private Double costoTotal;
 }

@@ -8,4 +8,8 @@ public class MedicamentoImportDTO {
     private String descripcion;
     private String codigoGenerico;
     private String laboratorio;
+    private Integer idUsuario;
+    private Integer inventario;
+    private Double costo;
+    private Double costoTotal;
 }

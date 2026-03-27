@@ -25,10 +25,10 @@ export interface DetalleConteo {
     tipoConteo: string;
 }
 
-export const getAllDetalles = async (idUsuario?: number, fecha?: string): Promise<DetalleConteo[]> => {
+export const getAllDetalles = async (idUsuario?: number, fecha?: string, startDate?: string, endDate?: string): Promise<DetalleConteo[]> => {
     try {
         const response = await axios.get(API_URL, {
-            params: { idUsuario, fecha }
+            params: { idUsuario, fecha, startDate, endDate }
         });
         return response.data;
     } catch (error) {

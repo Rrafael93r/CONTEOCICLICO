@@ -18,9 +18,25 @@ public class DetalleConteoService {
     public List<DetalleConteo> getDetallesByUsuarioYFecha(Integer idUsuario, LocalDate fecha) {
         return detalleConteoRepository.findByIdUsuarioAndFechaRegistro(idUsuario, fecha);
     }
+    
+    public List<DetalleConteo> getDetallesByUsuario(Integer idUsuario) {
+        return detalleConteoRepository.findByIdUsuario(idUsuario);
+    }
+    
+    public List<DetalleConteo> getDetallesByFecha(LocalDate fecha) {
+        return detalleConteoRepository.findByFechaRegistro(fecha);
+    }
 
     public List<DetalleConteo> getAllDetalles() {
         return detalleConteoRepository.findAll();
+    }
+
+    public List<DetalleConteo> getDetallesByRango(LocalDate start, LocalDate end) {
+        return detalleConteoRepository.findByFechaRegistroBetween(start, end);
+    }
+
+    public List<DetalleConteo> getDetallesByUsuarioYRango(Integer idUsuario, LocalDate start, LocalDate end) {
+        return detalleConteoRepository.findByIdUsuarioAndFechaRegistroBetween(idUsuario, start, end);
     }
 
     public Optional<DetalleConteo> getDetalleById(Integer id) {

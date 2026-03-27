@@ -18,25 +18,52 @@ public class MedicamentoService {
         return medicamentoRepository.findAll();
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public void importFromExternalData(List<MedicamentoImportDTO> items) {
-        for (MedicamentoImportDTO item : items) {
-            if (item.getPlu() == null || item.getPlu().isEmpty()) continue;
+        System.out.println("Iniciando sincronización avanzada (PLU + SEDE) de " + items.size() + " medicamentos...");
+        
+        // 1. Cargamos catálogo actual en memoria usando llave compuesta para no duplicar por sede
+        List<Medicamento> currentCatalog = medicamentoRepository.findAll();
+        java.util.Map<String, Medicamento> medMap = new java.util.HashMap<>();
+        for (Medicamento m : currentCatalog) {
+            if (m.getPlu() != null && m.getIdUsuario() != null) {
+                // Llave única por sede: "PLU_IDUSUARIO"
+                medMap.put(m.getPlu() + "_" + m.getIdUsuario(), m);
+            }
+        }
 
-            Medicamento med = medicamentoRepository.findByPlu(item.getPlu())
-                    .orElse(new Medicamento());
+        java.util.List<Medicamento> toSave = new java.util.ArrayList<>();
+
+        for (MedicamentoImportDTO item : items) {
+            if (item.getPlu() == null || item.getPlu().isEmpty() || item.getIdUsuario() == null) continue;
+
+            // Buscamos si ya existe ese PLU específico EN ESA SEDE
+            String compositeKey = item.getPlu() + "_" + item.getIdUsuario();
+            Medicamento med = medMap.get(compositeKey);
             
-            med.setPlu(item.getPlu());
+            if (med == null) {
+                // Si no existe para esa sede, lo creamos
+                med = new Medicamento();
+                med.setPlu(item.getPlu());
+                med.setIdUsuario(item.getIdUsuario()); // Vinculamos a la sede
+                med.setEstadoDelConteo("no");
+            }
+            
+            // Actualizamos solo los datos informativos
             if (item.getDescripcion() != null) med.setDescripcion(item.getDescripcion());
             if (item.getCodigoGenerico() != null) med.setCodigoGenerico(item.getCodigoGenerico());
             if (item.getLaboratorio() != null) med.setLaboratorio(item.getLaboratorio());
             
-            // Por defecto, si es nuevo, el estado del conteo es "no"
-            if (med.getId() == null) {
-                med.setEstadoDelConteo("no");
-            }
+            // Inventario y Costos específicos de esta sede
+            if (item.getInventario() != null) med.setInventario(item.getInventario());
+            if (item.getCosto() != null) med.setCosto(item.getCosto());
+            if (item.getCostoTotal() != null) med.setCostoTotal(item.getCostoTotal());
             
-            medicamentoRepository.save(med);
+            toSave.add(med);
         }
+        
+        medicamentoRepository.saveAll(toSave);
+        System.out.println("Sincronización multi-sede completada exitosamente.");
     }
 
     public Optional<Medicamento> getMedicamentoById(Integer id) {

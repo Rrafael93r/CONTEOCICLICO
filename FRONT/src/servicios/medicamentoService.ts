@@ -10,6 +10,9 @@ export interface Medicamento {
     laboratorio: string;
     estadoDelConteo: string;
     idUsuario?: number;
+    inventario?: number;
+    costo?: number;
+    costoTotal?: number;
 }
 
 export const getAllMedicamentos = async (): Promise<Medicamento[]> => {

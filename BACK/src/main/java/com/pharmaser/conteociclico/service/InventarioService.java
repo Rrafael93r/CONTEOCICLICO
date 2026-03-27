@@ -9,10 +9,14 @@ import com.pharmaser.conteociclico.repository.UsuarioRepository;
 import com.pharmaser.conteociclico.repository.MedicamentoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.ArrayList;
 
 @Service
 public class InventarioService {
@@ -30,28 +34,68 @@ public class InventarioService {
         return inventarioRepository.findAll();
     }
 
+    @Transactional
     public void importFromExternalData(List<InventarioImportDTO> items) {
-        for (InventarioImportDTO item : items) {
-            // Buscamos el usuario por su sede
-            usuarioRepository.findBySede(item.getSede()).ifPresent(usuario -> {
-                // Buscamos el medicamento por su PLU
-                medicamentoRepository.findByPlu(item.getPlu()).ifPresent(med -> {
-                    
-                    // Buscamos si ya existe un registro para este usuario y medicamento
-                    Inventario inv = inventarioRepository
-                        .findByIdUsuarioAndIdMedicamento(usuario.getId(), med.getId())
-                        .orElse(new Inventario());
-                    
-                    inv.setIdUsuario(usuario.getId());
-                    inv.setIdMedicamento(med.getId());
-                    inv.setCantidadActual(item.getCantidad());
-                    inv.setFechaRegistro(LocalDate.now());
-                    inv.setHoraRegistro(LocalTime.now());
-                    
-                    inventarioRepository.save(inv);
-                });
-            });
+        System.out.println("Iniciando AUTO-SINCRONIZACIÓN de saldos (" + items.size() + " referencias)...");
+        
+        // 1. Limpieza de saldos previos
+        inventarioRepository.deleteAllInBatch();
+
+        // 2. Cargamos usuarios para normalizar sedes
+        List<Usuario> usuarios = usuarioRepository.findAll();
+        Map<String, Integer> sedeToIdMap = new HashMap<>();
+        for (Usuario u : usuarios) {
+            if (u.getSede() != null) {
+                try {
+                    String norm = String.valueOf(Integer.parseInt(u.getSede().trim()));
+                    sedeToIdMap.put(norm, u.getId());
+                } catch (Exception e) {
+                    sedeToIdMap.put(u.getSede().trim(), u.getId());
+                }
+            }
         }
+
+        // 3. Cargamos catálogo de medicamentos para extraer la cantidad actual
+        List<Medicamento> medicamentos = medicamentoRepository.findAll();
+        Map<String, Medicamento> pluSedeToMedMap = new HashMap<>();
+        for (Medicamento m : medicamentos) {
+            if (m.getPlu() != null && m.getIdUsuario() != null) {
+                pluSedeToMedMap.put(m.getPlu() + "_" + m.getIdUsuario(), m);
+            }
+        }
+
+        List<Inventario> toSave = new ArrayList<>();
+        LocalDate now = LocalDate.now();
+        LocalTime time = LocalTime.now();
+
+        for (InventarioImportDTO item : items) {
+            if (item.getPlu() == null || item.getSede() == null) continue;
+
+            // Normalización de sede del Excel
+            String normSede;
+            try { normSede = String.valueOf(Integer.parseInt(item.getSede().trim())); }
+            catch (Exception e) { normSede = item.getSede().trim(); }
+            
+            Integer idUsuario = sedeToIdMap.get(normSede);
+            if (idUsuario == null) continue;
+
+            // Buscamos el medicamento para esta sede y extraemos su inventario quemado
+            Medicamento med = pluSedeToMedMap.get(item.getPlu() + "_" + idUsuario);
+            if (med == null) continue;
+
+            Inventario inv = new Inventario();
+            inv.setIdUsuario(idUsuario);
+            inv.setIdMedicamento(med.getId());
+            // TRAEMOS LA CANTIDAD DIRECTAMENTE DE LA TABLA MEDICAMENTO
+            inv.setCantidadActual(med.getInventario() != null ? med.getInventario() : 0);
+            inv.setFechaRegistro(now);
+            inv.setHoraRegistro(time);
+            
+            toSave.add(inv);
+        }
+        
+        inventarioRepository.saveAll(toSave);
+        System.out.println("Auto-sincronización completada exitosamente. " + toSave.size() + " saldos actualizados desde el catálogo.");
     }
 
     public Optional<Inventario> getInventarioById(Integer id) {
@@ -59,7 +103,7 @@ public class InventarioService {
     }
 
     public Inventario saveInventario(Inventario inventario) {
-        return (Inventario) inventarioRepository.save(inventario);
+        return inventarioRepository.save(inventario);
     }
 
     public void deleteInventario(Integer id) {
