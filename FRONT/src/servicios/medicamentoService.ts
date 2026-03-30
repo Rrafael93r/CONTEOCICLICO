@@ -15,9 +15,11 @@ export interface Medicamento {
     costoTotal?: number;
 }
 
-export const getAllMedicamentos = async (): Promise<Medicamento[]> => {
+export const getAllMedicamentos = async (idUsuario?: number): Promise<Medicamento[]> => {
     try {
-        const response = await axios.get(API_URL);
+        const response = await axios.get(API_URL, {
+            params: { idUsuario }
+        });
         return response.data;
     } catch (error) {
         throw error;
@@ -52,6 +54,15 @@ export const bulkUpdateInventory = async (items: any[]) => {
 export const resetCycleByUsuario = async (idUsuario: number) => {
     try {
         const response = await axios.post(`${API_URL}/reset-cycle/${idUsuario}`);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const bulkUpdateMedicamentoStatus = async (ids: number[]) => {
+    try {
+        const response = await axios.put(`${API_URL}/bulk-status`, ids);
         return response.data;
     } catch (error) {
         throw error;

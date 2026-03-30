@@ -36,7 +36,6 @@ public class InventarioService {
 
     @Transactional
     public void importFromExternalData(List<InventarioImportDTO> items) {
-        System.out.println("Iniciando AUTO-SINCRONIZACIÓN de saldos (" + items.size() + " referencias)...");
         
         // 1. Limpieza de saldos previos
         inventarioRepository.deleteAllInBatch();
@@ -95,7 +94,6 @@ public class InventarioService {
         }
         
         inventarioRepository.saveAll(toSave);
-        System.out.println("Auto-sincronización completada exitosamente. " + toSave.size() + " saldos actualizados desde el catálogo.");
     }
 
     public Optional<Inventario> getInventarioById(Integer id) {

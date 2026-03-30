@@ -16,7 +16,10 @@ public class MedicamentoController {
     private MedicamentoService medicamentoService;
 
     @GetMapping
-    public List<Medicamento> getAll() {
+    public List<Medicamento> getAll(@RequestParam(required = false) Integer idUsuario) {
+        if (idUsuario != null) {
+            return medicamentoService.getMedicamentosByUsuario(idUsuario);
+        }
         return medicamentoService.getAllMedicamentos();
     }
 
@@ -30,6 +33,12 @@ public class MedicamentoController {
     public ResponseEntity<String> bulkInventory(@RequestBody List<java.util.Map<String, Object>> items) {
         medicamentoService.bulkUpdateInventory(items);
         return ResponseEntity.ok("Saldos actualizados exitosamente");
+    }
+
+    @PutMapping("/bulk-status")
+    public ResponseEntity<String> bulkUpdateStatus(@RequestBody List<Integer> ids) {
+        medicamentoService.markAsCounted(ids);
+        return ResponseEntity.ok("Estados actualizados exitosamente");
     }
 
     @GetMapping("/{id}")

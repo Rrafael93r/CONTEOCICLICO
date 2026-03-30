@@ -43,16 +43,15 @@ const AdminPanel: React.FC = () => {
 
     useEffect(() => {
         loadInitialData();
-    }, [activeTab]);
+    }, [activeTab, startDate, endDate, filterUser]);
 
     const loadInitialData = async () => {
         setLoading(true);
         try {
             if (activeTab === 'usuarios') {
-                const [uData, mData] = await Promise.all([getAllUsuarios(), getAllMedicamentos()]);
+                const uData = await getAllUsuarios();
                 // Solo mostrar usuarios con Rol 1 (Farmacia)
                 setUsuarios(uData.filter(u => u.rol?.id === 1));
-                setMedicamentos(mData);
             } else if (activeTab === 'asignar') {
                 const [uData, mData] = await Promise.all([getAllUsuarios(), getAllMedicamentos()]);
                 // Solo mostrar usuarios con Rol 1 (Farmacia) para asignar
@@ -60,7 +59,12 @@ const AdminPanel: React.FC = () => {
                 setMedicamentos(mData);
             }
             else if (activeTab === 'reportes') {
-                const data = await getAllDetalles(undefined, undefined, startDate, endDate);
+                const data = await getAllDetalles(
+                    filterUser ? Number(filterUser) : undefined, 
+                    undefined, 
+                    startDate, 
+                    endDate
+                );
                 setDetalles(data);
             }
         } catch (error) {
@@ -254,23 +258,29 @@ const AdminPanel: React.FC = () => {
                         setUsuarios(currentUsers);
                     }
 
+                    const userSedeMap = new Map();
+                    currentUsers.forEach(u => {
+                        if (u.sede) {
+                            const s = String(u.sede).trim();
+                            userSedeMap.set(s, u.id);
+                            userSedeMap.set(s.toUpperCase(), u.id);
+                            if (!isNaN(parseInt(s))) userSedeMap.set(parseInt(s), u.id);
+                        }
+                    });
+
                     const mapped = jsonData.map((row, index) => {
                         const rawSede = row.Sede || row.sede || row.SEDE || row['Sede '] || row['SEDE '];
                         const sedeCode = String(rawSede || '').trim();
 
-                        const foundUser = currentUsers.find(u => {
-                            const uSedeNum = u.sede ? parseInt(String(u.sede).trim(), 10) : NaN;
-                            const rowSedeNum = sedeCode ? parseInt(sedeCode, 10) : NaN;
-                            if (!isNaN(uSedeNum) && !isNaN(rowSedeNum) && uSedeNum === rowSedeNum) return true;
-                            if (u.sede && String(u.sede).toUpperCase() === sedeCode.toUpperCase()) return true;
-                            return false;
-                        });
+                        const foundUserId = userSedeMap.get(sedeCode) || 
+                                          userSedeMap.get(sedeCode.toUpperCase()) ||
+                                          userSedeMap.get(parseInt(sedeCode));
 
                         return {
                             plu: String(row.PLU || row.plu || ''),
                             descripcion: String(row.Descripcion || row.descripcion || row.DESCRIPCION || ''),
                             codigoGenerico: String(row.Generico || row.generico || row['CODIGO GENERICO'] || ''),
-                            idUsuario: foundUser?.id,
+                            idUsuario: foundUserId,
                             inventario: parseInt(row.Inventario || row.inventario || '0'),
                             costo: parseFloat(row.Costo || row.costo || '0'),
                             costoTotal: parseFloat(row['Costo total'] || row.costoTotal || '0'),
@@ -289,15 +299,42 @@ const AdminPanel: React.FC = () => {
                         return;
                     }
 
-                    await bulkImportMedicamentos(mapped);
+                    const batchSize = 10000;
+                    const totalBatches = Math.ceil(mapped.length / batchSize);
+                    let processed = 0;
 
-                    Swal.fire({
-                        icon: 'success',
-                        title: '<span class="text-xl font-black text-gray-900 uppercase">¡Sincronización Exitosa!</span>',
-                        text: `Se han vinculado ${mapped.length} medicamentos correctamente.`,
-                        confirmButtonColor: '#f6952c',
-                        customClass: { popup: 'rounded-[2rem]' }
-                    });
+                    for (let i = 0; i < mapped.length; i += batchSize) {
+                        if (controller.signal.aborted) {
+                            break;
+                        }
+
+                        const batch = mapped.slice(i, i + batchSize);
+                        
+                        Swal.update({
+                            title: '<span class="text-2xl font-black text-gray-900 uppercase italic">Importando Datos</span>',
+                            html: `
+                                <div class="py-10">
+                                    <div class="w-20 h-20 border-8 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-6 shadow-2xl shadow-orange-500/20"></div>
+                                    <p class="text-gray-500 font-bold uppercase tracking-widest text-xs animate-pulse">Enviando lote ${Math.floor(i / batchSize) + 1} de ${totalBatches}...</p>
+                                    <p class="text-gray-400 text-[10px] mt-2 italic px-8">Procesando registros del ${i + 1} al ${Math.min(i + batchSize, mapped.length)} de ${mapped.length}.</p>
+                                    <p class="text-orange-500 text-lg mt-4 font-black">${Math.round((processed / mapped.length) * 100)}% Completado</p>
+                                </div>
+                            `
+                        });
+
+                        await bulkImportMedicamentos(batch);
+                        processed += batch.length;
+                    }
+
+                    if (!controller.signal.aborted) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: '<span class="text-xl font-black text-gray-900 uppercase">¡Sincronización Exitosa!</span>',
+                            text: `Se han vinculado ${mapped.length} medicamentos correctamente en ${totalBatches} lotes.`,
+                            confirmButtonColor: '#f6952c',
+                            customClass: { popup: 'rounded-[2rem]' }
+                        });
+                    }
                 } else {
                     const mapped = jsonData.map(row => ({
                         sede: String(row.SEDE || row.sede || row.USUARIO || row.Punto || ''),
@@ -305,15 +342,40 @@ const AdminPanel: React.FC = () => {
                         cantidad: parseInt(row.SALDO || row.saldo || row.CANTIDAD || row.Inventario || '0')
                     })).filter(item => item.plu && item.sede);
 
-                    await bulkUpdateInventory(mapped);
+                    const batchSize = 10000;
+                    const totalBatches = Math.ceil(mapped.length / batchSize);
+                    let processed = 0;
 
-                    Swal.fire({
-                        icon: 'success',
-                        title: '<span class="text-xl font-black text-gray-900 uppercase">¡Inventario Sincronizado!</span>',
-                        text: `Se actualizaron ${mapped.length} saldos en la red.`,
-                        confirmButtonColor: '#f6952c',
-                        customClass: { popup: 'rounded-[2rem]' }
-                    });
+                    for (let i = 0; i < mapped.length; i += batchSize) {
+                        if (controller.signal.aborted) break;
+
+                        const batch = mapped.slice(i, i + batchSize);
+                        
+                        Swal.update({
+                            title: '<span class="text-2xl font-black text-gray-900 uppercase italic">Sincronizando Inventario</span>',
+                            html: `
+                                <div class="py-10">
+                                    <div class="w-20 h-20 border-8 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-6 shadow-2xl shadow-orange-500/20"></div>
+                                    <p class="text-gray-500 font-bold uppercase tracking-widest text-xs animate-pulse">Enviando lote ${Math.floor(i / batchSize) + 1} de ${totalBatches}...</p>
+                                    <p class="text-gray-400 text-[10px] mt-2 italic px-8">Actualizando saldos del ${i + 1} al ${Math.min(i + batchSize, mapped.length)} de ${mapped.length}.</p>
+                                    <p class="text-orange-500 text-lg mt-4 font-black">${Math.round((processed / mapped.length) * 100)}% Completado</p>
+                                </div>
+                            `
+                        });
+
+                        await bulkUpdateInventory(batch);
+                        processed += batch.length;
+                    }
+
+                    if (!controller.signal.aborted) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: '<span class="text-xl font-black text-gray-900 uppercase">¡Inventario Sincronizado!</span>',
+                            text: `Se actualizaron ${mapped.length} saldos en la red en ${totalBatches} lotes.`,
+                            confirmButtonColor: '#f6952c',
+                            customClass: { popup: 'rounded-[2rem]' }
+                        });
+                    }
                 }
                 loadInitialData();
             } catch (error: any) {
@@ -348,11 +410,16 @@ const AdminPanel: React.FC = () => {
         XLSX.writeFile(workbook, `PLANTILLA_${type.toUpperCase()}.xlsx`);
     };
 
-    const filteredMeds = medicamentos.filter(m =>
-        (m.descripcion?.toLowerCase() || '').includes(medSearchTerm.toLowerCase()) ||
-        (m.plu || '').includes(medSearchTerm) ||
-        (m.codigoGenerico || '').includes(medSearchTerm)
-    ).slice(0, 10);
+    const filteredMeds = medicamentos.filter(m => {
+        // Filtrar por el usuario/sede seleccionado actualmente
+        if (selectedUser && m.idUsuario !== Number(selectedUser)) return false;
+
+        return (
+            (m.descripcion?.toLowerCase() || '').includes(medSearchTerm.toLowerCase()) ||
+            (m.plu || '').includes(medSearchTerm) ||
+            (m.codigoGenerico || '').includes(medSearchTerm)
+        );
+    }).slice(0, 10);
 
     const filteredUsers = (usuarios || []).filter(u =>
         u.usuario?.toLowerCase().includes(userSearchTerm.toLowerCase()) ||
@@ -539,7 +606,12 @@ const AdminPanel: React.FC = () => {
                                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">1. Seleccionar Usuario</label>
                                     <select
                                         value={selectedUser}
-                                        onChange={(e) => setSelectedUser(Number(e.target.value))}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setSelectedUser(val === "" ? "" : Number(val));
+                                            setSelectedMed(""); // Limpiar medicamento al cambiar sede
+                                            setMedSearchTerm("");
+                                        }}
                                         className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 cursor-pointer"
                                     >
                                         <option value="">Selecciona un usuario...</option>
@@ -574,7 +646,7 @@ const AdminPanel: React.FC = () => {
                                                 >
                                                     <div className="flex flex-col">
                                                         <span className="text-sm font-black">{m.descripcion}</span>
-                                                        <span className="text-[10px] font-bold opacity-70">PLU: {m.plu} | Sede: {usuarios.find(u => u.id === m.idUsuario)?.sede || 'N/A'}</span>
+                                                        <span className="text-[10px] font-bold opacity-70">PLU: {m.plu} | Inventario: {m.inventario} | Estado: {m.estadoDelConteo?.toUpperCase()}</span>
                                                     </div>
                                                 </button>
                                             ))}

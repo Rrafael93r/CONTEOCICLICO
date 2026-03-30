@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { getAllMedicamentos, updateMedicamento, Medicamento } from '../../servicios/medicamentoService';
-import { createDetalle, getAllDetalles, updateDetalle, DetalleConteo } from '../../servicios/detalleConteoService';
+import { getAllMedicamentos, updateMedicamento, Medicamento, resetCycleByUsuario, bulkUpdateMedicamentoStatus } from '../../servicios/medicamentoService';
+import { createDetalle, getAllDetalles, updateDetalle, DetalleConteo, bulkCreateDetalles, bulkUpdateDetalles } from '../../servicios/detalleConteoService';
 import { getAllPersonalizados } from '../../servicios/personalizadoService';
 import { getCurrentUser } from '../../servicios/authServices';
 import Swal from 'sweetalert2';
@@ -52,23 +52,24 @@ const DetalleConteoTable: React.FC = () => {
 
             const now = new Date();
             const fechaHoy = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
-            const allMedsForLookup = await getAllMedicamentos();
             
+            const [allMedsForLookup, rawDetalles, rawPersonalizados] = await Promise.all([
+                getAllMedicamentos(currentUser.id),
+                getAllDetalles(currentUser.id, fechaHoy),
+                getAllPersonalizados(currentUser.id, fechaHoy)
+            ]);
+
             // Filtro local estricto adicional al remoto
-            let rawDetalles = await getAllDetalles(currentUser.id, fechaHoy);
             let hoyUserDetalles = rawDetalles.filter(d => normalizeDate(d.fechaRegistro) === fechaHoy);
-            
-            let rawPersonalizados = await getAllPersonalizados(currentUser.id, fechaHoy);
             const hoyPersonalizados = rawPersonalizados.filter(p => normalizeDate(p.fechaProgramacion) === fechaHoy);
+
 
             // 1. PROCESAR PERSONALIZADOS (SIN DUPLICADOS)
             for (const p of hoyPersonalizados) {
                 const pId = p.idMedicamento || p.medicamento?.id;
                 if (!pId) continue;
 
-                const yaEnDetalle = hoyUserDetalles.some(d => 
-                    Number(d.idMedicamento || d.medicamento?.id) === Number(pId)
-                );
+                const yaEnDetalle = hoyUserDetalles.some(d => d.idPersonalizado === p.id);
 
                 if (!yaEnDetalle) {
                     const medInfo = p.medicamento || allMedsForLookup.find(m => Number(m.id) === Number(pId));
@@ -81,7 +82,8 @@ const DetalleConteoTable: React.FC = () => {
                         cantidadActual: cantAct,
                         fechaRegistro: fechaHoy,
                         horaRegistro: null,
-                        tipoConteo: 'Personalizado'
+                        tipoConteo: 'Personalizado',
+                        idPersonalizado: p.id
                     });
 
                     if (medInfo) {
@@ -114,52 +116,81 @@ const DetalleConteoTable: React.FC = () => {
                     // EXCLUIR MEDICAMENTOS QUE YA ESTÁN EN LA TABLA DE HOY (COMO PERSONALIZADOS)
                     const currentIdsInTable = hoyUserDetalles.map(d => Number(d.idMedicamento || d.medicamento?.id));
 
-                    const pendingMeds = allMedsForLookup.filter(m =>
-                        m.idUsuario === currentUser.id && 
+                    let pendingMeds = allMedsForLookup.filter(m =>
+                        m.idUsuario === currentUser.id &&
                         m.estadoDelConteo?.toLowerCase() === 'no' &&
                         !currentIdsInTable.includes(Number(m.id))
                     );
 
-                    if (pendingMeds.length > 0) {
-                        // PRIORIDAD: Los medicamentos con mayor COSTO TOTAL de primero
-                        const sortedMeds = [...pendingMeds].sort((a, b) => 
-                            (b.costoTotal || 0) - (a.costoTotal || 0)
-                        );
+                    // Lógica mejorada: Si no hay suficientes, reservamos los actuales y reiniciamos para completar
+                    let medsToProcess = [];
+                    const initialUniqueCodes = new Set(pendingMeds.map(m => m.codigoGenerico)).size;
 
-                        const uniqueProductCodes: string[] = [];
+                    if (initialUniqueCodes < quota) {
+
+                        // 1. Guardamos los IDs de los que ya estaban pendientes para darles prioridad
+                        const oldPendingIds = pendingMeds.map(m => m.id);
+
+                        // 2. Reiniciamos el ciclo en el servidor
+                        await resetCycleByUsuario(currentUser.id);
+
+                        // 3. Obtenemos el catálogo refrescado
+                        const refreshedMeds = await getAllMedicamentos(currentUser.id);
+
+                        // 4. Los "nuevos" candidatos son los que no estaban en el grupo de pendientes originales
+                        // (y que obviamente no estén ya en la tabla de hoy)
+                        const additionalCandidates = refreshedMeds.filter(m =>
+                            m.idUsuario === currentUser.id &&
+                            !oldPendingIds.includes(m.id) &&
+                            !currentIdsInTable.includes(Number(m.id))
+                        ).sort((a, b) => (b.costoTotal || 0) - (a.costoTotal || 0));
+
+                        // Unimos: Primero los rezagados del ciclo anterior, luego el resto por costo
+                        medsToProcess = [...pendingMeds, ...additionalCandidates];
+                    } else {
+                        // Si hay suficientes, simplemente ordenamos los pendientes por costo
+                        medsToProcess = [...pendingMeds].sort((a, b) => (b.costoTotal || 0) - (a.costoTotal || 0));
+                    }
+
+                    if (medsToProcess.length > 0) {
+                        const uniqueProductCodes = new Set<string>();
                         const selectedMeds: Medicamento[] = [];
 
-                        for (const med of sortedMeds) {
-                            if (uniqueProductCodes.includes(med.codigoGenerico)) {
+                        for (const med of medsToProcess) {
+                            // Si es una molécula que ya incluimos en la selección de hoy, la agregamos (si hay stock)
+                            if (uniqueProductCodes.has(med.codigoGenerico)) {
                                 if (med.inventario > 0) selectedMeds.push(med);
                                 continue;
                             }
 
-                            if (uniqueProductCodes.length < quota) {
+                            // Si es una nueva molécula y aún no llegamos a la cuota, la incluimos
+                            if (uniqueProductCodes.size < quota) {
                                 if (med.inventario > 0) {
-                                    uniqueProductCodes.push(med.codigoGenerico);
+                                    uniqueProductCodes.add(med.codigoGenerico);
                                     selectedMeds.push(med);
                                 }
                             } else {
+                                // Ya completamos la cuota de moléculas únicas
                                 break;
                             }
                         }
 
                         if (selectedMeds.length > 0) {
-                            await Promise.all(selectedMeds.map(async (m) => {
-                                const cantAct = m.inventario || 0;
-                                await createDetalle({
-                                    idMedicamento: m.id,
-                                    idUsuario: currentUser.id,
-                                    cantidadContada: null,
-                                    cantidadActual: cantAct,
-                                    fechaRegistro: fechaHoy,
-                                    horaRegistro: null,
-                                    tipoConteo: 'Cíclico'
-                                });
-                                await updateMedicamento(m.id, { ...m, estadoDelConteo: 'sí' });
+                            const bulkPayload = selectedMeds.map(m => ({
+                                idMedicamento: m.id,
+                                idUsuario: currentUser.id,
+                                cantidadContada: null,
+                                cantidadActual: m.inventario || 0,
+                                fechaRegistro: fechaHoy,
+                                horaRegistro: null,
+                                tipoConteo: 'Cíclico'
                             }));
-                            
+
+                            await Promise.all([
+                                bulkCreateDetalles(bulkPayload as any),
+                                bulkUpdateMedicamentoStatus(selectedMeds.map(m => m.id))
+                            ]);
+
                             const updatedRaw = await getAllDetalles(currentUser.id, fechaHoy);
                             hoyUserDetalles = updatedRaw.filter(d => normalizeDate(d.fechaRegistro) === fechaHoy);
                         }
@@ -171,6 +202,7 @@ const DetalleConteoTable: React.FC = () => {
                 ...d,
                 inputValue: d.cantidadContada !== null ? d.cantidadContada : ''
             })));
+            Swal.close();
 
         } catch (error) {
             Swal.fire({
@@ -216,19 +248,33 @@ const DetalleConteoTable: React.FC = () => {
         if (!result.isConfirmed) return;
 
         setLoading(true);
+        Swal.fire({
+            title: '<span class="text-2xl font-black text-gray-900 uppercase italic">Sincronizando</span>',
+            html: `
+                <div class="py-10">
+                    <div class="w-20 h-20 border-8 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-6 shadow-2xl shadow-orange-500/20"></div>
+                    <p class="text-gray-500 font-bold uppercase tracking-widest text-xs animate-pulse">Guardando ${toSave.length} reportes...</p>
+                </div>
+            `,
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+
         try {
-            await Promise.all(toSave.map(async (d) => {
+            const requestData = toSave.map((d) => {
                 const now = new Date();
                 const horaActual = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                await updateDetalle(d.id, {
+                return {
                     ...d,
                     cantidadContada: Number(d.inputValue),
                     horaRegistro: horaActual
-                });
-            }));
+                };
+            });
+            await bulkUpdateDetalles(requestData);
 
+            await fetchData();
+            
             Toast.fire({ icon: 'success', title: '¡Reportes sincronizados!' });
-            fetchData();
         } catch (error) {
             Swal.fire({ icon: 'error', title: 'Error al Guardar', text: 'No se pudieron enviar los reportes.' });
         } finally {
@@ -239,7 +285,7 @@ const DetalleConteoTable: React.FC = () => {
     const filteredDetalles = detalles.filter(d => {
         const now = new Date();
         const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
-        
+
         return normalizeDate(d.fechaRegistro) === today && d.cantidadContada === null && (
             (d.medicamento?.descripcion.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
             (d.medicamento?.plu || '').includes(searchTerm) ||
@@ -319,10 +365,11 @@ const DetalleConteoTable: React.FC = () => {
                                         ) : (
                                             <input
                                                 type="number"
-                                                className="w-full text-center py-5 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-black text-orange-600 text-xl shadow-inner transition-all placeholder:text-gray-200"
+                                                className={`w-full text-center py-5 rounded-2xl border-2 border-transparent outline-none font-black text-xl shadow-inner transition-all placeholder:text-gray-200 ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-orange-600'}`}
                                                 placeholder="0"
                                                 value={d.inputValue}
                                                 onChange={(e) => handleInputValueChange(d.id, e.target.value)}
+                                                disabled={loading}
                                             />
                                         )}
                                     </td>
@@ -378,10 +425,11 @@ const DetalleConteoTable: React.FC = () => {
                                 ) : (
                                     <input
                                         type="number"
-                                        className="w-full py-5 bg-gray-50 border-2 border-transparent focus:border-orange-500 rounded-2xl text-center font-black text-3xl text-orange-600 outline-none transition-all shadow-inner"
+                                        className={`w-full py-5 border-2 border-transparent rounded-2xl text-center font-black text-3xl outline-none transition-all shadow-inner ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-orange-600'}`}
                                         placeholder="0"
                                         value={d.inputValue}
                                         onChange={(e) => handleInputValueChange(d.id, e.target.value)}
+                                        disabled={loading}
                                     />
                                 )}
                             </div>

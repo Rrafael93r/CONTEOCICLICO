@@ -47,6 +47,16 @@ public class DetalleConteoController {
         return detalleConteoService.saveDetalle(detalle);
     }
 
+    @PostMapping("/bulk")
+    public List<DetalleConteo> bulkCreate(@RequestBody List<DetalleConteo> detalles) {
+        return detalleConteoService.saveAllDetalles(detalles);
+    }
+
+    @PutMapping("/bulk")
+    public List<DetalleConteo> bulkUpdate(@RequestBody List<DetalleConteo> detalles) {
+        return detalleConteoService.saveAllDetalles(detalles);
+    }
+
     @PutMapping("/{id}")
     public DetalleConteo update(@PathVariable Integer id, @RequestBody DetalleConteo detalle) {
         detalle.setId(id);

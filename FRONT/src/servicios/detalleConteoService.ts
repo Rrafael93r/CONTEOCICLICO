@@ -23,6 +23,7 @@ export interface DetalleConteo {
     fechaRegistro: string;
     horaRegistro: string | null;
     tipoConteo: string;
+    idPersonalizado?: number;
 }
 
 export const getAllDetalles = async (idUsuario?: number, fecha?: string, startDate?: string, endDate?: string): Promise<DetalleConteo[]> => {
@@ -47,6 +48,24 @@ export const createDetalle = async (detalle: Omit<DetalleConteo, 'id'>): Promise
 export const updateDetalle = async (id: number, detalle: Partial<DetalleConteo>): Promise<DetalleConteo> => {
     try {
         const response = await axios.put(`${API_URL}/${id}`, detalle);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const bulkCreateDetalles = async (detalles: Omit<DetalleConteo, 'id'>[]): Promise<DetalleConteo[]> => {
+    try {
+        const response = await axios.post(`${API_URL}/bulk`, detalles);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const bulkUpdateDetalles = async (detalles: Partial<DetalleConteo>[]): Promise<DetalleConteo[]> => {
+    try {
+        const response = await axios.put(`${API_URL}/bulk`, detalles);
         return response.data;
     } catch (error) {
         throw error;

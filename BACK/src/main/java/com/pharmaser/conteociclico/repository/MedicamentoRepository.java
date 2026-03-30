@@ -8,4 +8,5 @@ import java.util.Optional;
 public interface MedicamentoRepository extends JpaRepository<Medicamento, Integer> {
     Optional<Medicamento> findByPluAndIdUsuario(String plu, Integer idUsuario);
     List<Medicamento> findAllByPlu(String plu);
+    List<Medicamento> findByIdUsuario(Integer idUsuario);
 }

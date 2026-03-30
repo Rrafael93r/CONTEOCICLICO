@@ -8,6 +8,7 @@ import java.time.LocalTime;
 @Entity
 @Table(name = "detalleconteo")
 @Data
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class DetalleConteo {
 
     @Id
@@ -24,7 +25,7 @@ public class DetalleConteo {
     @Column(name = "idusuario")
     private Integer idUsuario;
 
-    @ManyToOne(fetch = FetchType.EAGER)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "idusuario", insertable = false, updatable = false)
     private Usuario usuario;
 
@@ -42,4 +43,7 @@ public class DetalleConteo {
 
     @Column(name = "tipoconteo")
     private String tipoConteo;
+
+    @Column(name = "idpersonalizado")
+    private Integer idPersonalizado;
 }

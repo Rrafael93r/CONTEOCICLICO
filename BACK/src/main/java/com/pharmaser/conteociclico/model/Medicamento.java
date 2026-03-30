@@ -6,6 +6,7 @@ import lombok.Data;
 @Entity
 @Table(name = "medicamento")
 @Data
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Medicamento {
 
     @Id
@@ -27,7 +28,8 @@ public class Medicamento {
     @Column(name = "idusuario")
     private Integer idUsuario;
 
-    @ManyToOne
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "idusuario", insertable = false, updatable = false)
     private Usuario usuario;
 
