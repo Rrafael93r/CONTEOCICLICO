@@ -1,7 +1,6 @@
 package com.pharmaser.conteociclico.config;
 
 import com.pharmaser.conteociclico.service.UserDetailsServiceImpl;
-import com.pharmaser.conteociclico.config.JwtUtil;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

@@ -24,5 +24,6 @@ public interface DetalleConteoRepository extends JpaRepository<DetalleConteo, In
     
     @Override
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"medicamento", "usuario"})
+    @org.springframework.lang.NonNull
     List<DetalleConteo> findAll();
 }

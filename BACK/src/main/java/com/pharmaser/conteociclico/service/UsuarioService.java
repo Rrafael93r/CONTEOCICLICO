@@ -7,6 +7,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.lang.NonNull;
 
 @Service
 public class UsuarioService {
@@ -21,7 +22,7 @@ public class UsuarioService {
         return usuarioRepository.findAll();
     }
 
-    public Optional<Usuario> getUsuarioById(Integer id) {
+    public Optional<Usuario> getUsuarioById(@NonNull Integer id) {
         return usuarioRepository.findById(id);
     }
 
@@ -37,16 +38,16 @@ public class UsuarioService {
         return usuarioRepository.save(usuario);
     }
 
-    public Usuario updateUsuario(Integer id, Usuario usuario) {
-        return usuarioRepository.findById(id).map(existingUser -> {
+    public Usuario updateUsuario(@NonNull Integer id, Usuario usuario) {
+        return usuarioRepository.findById(id).map((@NonNull Usuario existingUser) -> {
             if (usuario.getUsuario() != null) existingUser.setUsuario(usuario.getUsuario());
             if (usuario.getSede() != null) existingUser.setSede(usuario.getSede());
             if (usuario.getNumeroConteo() != null) existingUser.setNumeroConteo(usuario.getNumeroConteo());
-            return (Usuario) usuarioRepository.save(existingUser);
+            return usuarioRepository.save(existingUser);
         }).orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
     }
 
-    public void deleteUsuario(Integer id) {
+    public void deleteUsuario(@NonNull Integer id) {
         usuarioRepository.deleteById(id);
     }
 }

@@ -3,6 +3,7 @@ package com.pharmaser.conteociclico.controller;
 import com.pharmaser.conteociclico.dto.InventarioImportDTO;
 import com.pharmaser.conteociclico.model.Inventario;
 import com.pharmaser.conteociclico.service.InventarioService;
+import org.springframework.lang.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +22,7 @@ public class InventarioController {
     }
 
     @PostMapping
-    public Inventario create(@RequestBody Inventario inventario) {
+    public Inventario create(@RequestBody @NonNull Inventario inventario) {
         return inventarioService.saveInventario(inventario);
     }
 
@@ -32,7 +33,7 @@ public class InventarioController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+    public ResponseEntity<Void> delete(@PathVariable @NonNull Integer id) {
         inventarioService.deleteInventario(id);
         return ResponseEntity.noContent().build();
     }

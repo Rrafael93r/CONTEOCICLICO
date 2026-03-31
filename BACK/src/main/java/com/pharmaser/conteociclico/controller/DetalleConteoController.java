@@ -5,6 +5,7 @@ import com.pharmaser.conteociclico.service.DetalleConteoService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.lang.NonNull;
 import java.util.List;
 
 import java.time.LocalDate;
@@ -43,7 +44,7 @@ public class DetalleConteoController {
     }
 
     @PostMapping
-    public DetalleConteo create(@RequestBody DetalleConteo detalle) {
+    public DetalleConteo create(@RequestBody @NonNull DetalleConteo detalle) {
         return detalleConteoService.saveDetalle(detalle);
     }
 
@@ -64,7 +65,7 @@ public class DetalleConteoController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+    public ResponseEntity<Void> delete(@PathVariable @org.springframework.lang.NonNull Integer id) {
         detalleConteoService.deleteDetalle(id);
         return ResponseEntity.noContent().build();
     }

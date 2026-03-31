@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.lang.NonNull;
 
 @Service
 public class PersonalizadoService {
@@ -27,15 +28,15 @@ public class PersonalizadoService {
         return personalizadoRepository.findAll();
     }
 
-    public Optional<Personalizado> getPersonalizadoById(Integer id) {
+    public Optional<Personalizado> getPersonalizadoById(@NonNull Integer id) {
         return personalizadoRepository.findById(id);
     }
 
-    public Personalizado savePersonalizado(Personalizado personalizado) {
+    public Personalizado savePersonalizado(@NonNull Personalizado personalizado) {
         return personalizadoRepository.save(personalizado);
     }
 
-    public void deletePersonalizado(Integer id) {
+    public void deletePersonalizado(@NonNull Integer id) {
         personalizadoRepository.deleteById(id);
     }
 }

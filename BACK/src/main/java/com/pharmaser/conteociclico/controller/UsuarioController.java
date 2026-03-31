@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import org.springframework.lang.NonNull;
 
 @RestController
 @RequestMapping("/api/usuario")
@@ -20,7 +21,7 @@ public class UsuarioController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Usuario> getById(@PathVariable Integer id) {
+    public ResponseEntity<Usuario> getById(@PathVariable @NonNull Integer id) {
         return usuarioService.getUsuarioById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -32,12 +33,12 @@ public class UsuarioController {
     }
 
     @PutMapping("/{id}")
-    public Usuario update(@PathVariable Integer id, @RequestBody Usuario usuario) {
+    public Usuario update(@PathVariable @NonNull Integer id, @RequestBody Usuario usuario) {
         return usuarioService.updateUsuario(id, usuario);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+    public ResponseEntity<Void> delete(@PathVariable @NonNull Integer id) {
         usuarioService.deleteUsuario(id);
         return ResponseEntity.noContent().build();
     }

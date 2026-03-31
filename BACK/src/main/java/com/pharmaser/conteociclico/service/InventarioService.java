@@ -7,6 +7,7 @@ import com.pharmaser.conteociclico.dto.InventarioImportDTO;
 import com.pharmaser.conteociclico.repository.InventarioRepository;
 import com.pharmaser.conteociclico.repository.UsuarioRepository;
 import com.pharmaser.conteociclico.repository.MedicamentoRepository;
+import org.springframework.lang.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -96,15 +97,15 @@ public class InventarioService {
         inventarioRepository.saveAll(toSave);
     }
 
-    public Optional<Inventario> getInventarioById(Integer id) {
+    public Optional<Inventario> getInventarioById(@NonNull Integer id) {
         return inventarioRepository.findById(id);
     }
 
-    public Inventario saveInventario(Inventario inventario) {
+    public Inventario saveInventario(@NonNull Inventario inventario) {
         return inventarioRepository.save(inventario);
     }
 
-    public void deleteInventario(Integer id) {
+    public void deleteInventario(@NonNull Integer id) {
         inventarioRepository.deleteById(id);
     }
 }

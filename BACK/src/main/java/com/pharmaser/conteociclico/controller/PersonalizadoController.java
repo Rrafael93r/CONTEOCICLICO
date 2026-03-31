@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.time.LocalDate;
+import org.springframework.lang.NonNull;
 
 @RestController
 @RequestMapping("/api/personalizado")
@@ -29,12 +30,12 @@ public class PersonalizadoController {
     }
 
     @PostMapping
-    public Personalizado create(@RequestBody Personalizado personalizado) {
+    public Personalizado create(@RequestBody @NonNull Personalizado personalizado) {
         return personalizadoService.savePersonalizado(personalizado);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+    public ResponseEntity<Void> delete(@PathVariable @NonNull Integer id) {
         personalizadoService.deletePersonalizado(id);
         return ResponseEntity.noContent().build();
     }
