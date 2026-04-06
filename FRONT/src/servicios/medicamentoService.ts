@@ -9,6 +9,7 @@ export interface Medicamento {
     codigoGenerico: string;
     laboratorio: string;
     estadoDelConteo: string;
+    tipomolecula?: string;
     idUsuario?: number;
     inventario?: number;
     costo?: number;

@@ -81,7 +81,10 @@ const AdminPanel: React.FC = () => {
     const handleSaveAllQuotas = async () => {
         try {
             setLoading(true);
-            await Promise.all(usuarios.map(u => updateUsuario(u.id, { numeroConteo: u.numeroConteo })));
+            await Promise.all(usuarios.map(u => updateUsuario(u.id, { 
+                numeroConteo: u.numeroConteo,
+                tipoConteo: u.tipoConteo 
+            })));
 
             Swal.fire({
                 icon: 'success',
@@ -284,7 +287,8 @@ const AdminPanel: React.FC = () => {
                             inventario: parseInt(row.Inventario || row.inventario || '0'),
                             costo: parseFloat(row.Costo || row.costo || '0'),
                             costoTotal: parseFloat(row['Costo total'] || row.costoTotal || '0'),
-                            laboratorio: String(row.Laboratorio || row.laboratorio || row.LABORATORIO || 'N/A')
+                            laboratorio: String(row.Laboratorio || row.laboratorio || row.LABORATORIO || 'N/A'),
+                            tipomolecula: String(row.TipoMolecula || row.tipomolecula || row.TIPO || row.Tipo || row.Molecula || row.MOLECULA || '')
                         };
                     }).filter(item => item.plu);
 
@@ -395,7 +399,7 @@ const AdminPanel: React.FC = () => {
 
     const downloadTemplate = (type: 'medicamento' | 'inventario') => {
         const headers = type === 'medicamento'
-            ? [['Sede', 'Generico', 'PLU', 'Descripcion', 'Inventario', 'Costo', 'Costo total', 'Laboratorio']]
+            ? [['Sede', 'Generico', 'PLU', 'Descripcion', 'Inventario', 'Costo', 'Costo total', 'Laboratorio', 'TipoMolecula']]
             : [['SEDE', 'PLU']];
 
         const worksheet = XLSX.utils.aoa_to_sheet(headers);
@@ -403,7 +407,7 @@ const AdminPanel: React.FC = () => {
         XLSX.utils.book_append_sheet(workbook, worksheet, "Plantilla");
 
         const wscols = type === 'medicamento'
-            ? [{ wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 40 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 20 }]
+            ? [{ wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 40 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 15 }]
             : [{ wch: 15 }, { wch: 15 }];
         worksheet['!cols'] = wscols;
 
@@ -497,6 +501,7 @@ const AdminPanel: React.FC = () => {
                                         <tr className="bg-gray-50/50">
                                             <th className="px-8 py-5 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Usuario / Sede</th>
                                             <th className="px-8 py-5 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Pendientes Por Contar</th>
+                                            <th className="px-8 py-5 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Tipo de Conteo</th>
                                             <th className="px-8 py-5 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Cuota Diaria</th>
                                             <th className="px-8 py-5 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Acciones</th>
                                         </tr>
@@ -519,6 +524,21 @@ const AdminPanel: React.FC = () => {
                                                     <span className="text-sm font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-lg">
                                                         {medicamentos.filter(m => m.idUsuario === u.id && m.estadoDelConteo?.toLowerCase() === 'no').length}
                                                     </span>
+                                                </td>
+                                                <td className="px-8 py-6 text-center">
+                                                    <select
+                                                        value={u.tipoConteo || 'TRADICIONAL'}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setUsuarios(prev => prev.map(user => user.id === u.id ? { ...user, tipoConteo: val } : user));
+                                                        }}
+                                                        className="w-full py-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-orange-500 outline-none font-black text-blue-600 text-[10px] uppercase"
+                                                    >
+                                                        <option value="TRADICIONAL">Tradicional</option>
+                                                        <option value="A">Molécula Tipo A</option>
+                                                        <option value="B">Molécula Tipo B</option>
+                                                        <option value="C">Molécula Tipo C</option>
+                                                    </select>
                                                 </td>
                                                 <td className="px-8 py-6 text-center">
                                                     <input
@@ -566,6 +586,22 @@ const AdminPanel: React.FC = () => {
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between gap-4 pt-4 border-t border-gray-50">
+                                        <div className="flex-1">
+                                            <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Tipo Conteo</p>
+                                            <select
+                                                value={u.tipoConteo || 'TRADICIONAL'}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setUsuarios(prev => prev.map(user => user.id === u.id ? { ...user, tipoConteo: val } : user));
+                                                }}
+                                                className="w-full py-2 bg-gray-50 rounded-xl text-center font-black text-blue-600 text-[10px] uppercase"
+                                            >
+                                                <option value="TRADICIONAL">Tradicional</option>
+                                                <option value="A">Molécula A</option>
+                                                <option value="B">Molécula B</option>
+                                                <option value="C">Molécula C</option>
+                                            </select>
+                                        </div>
                                         <div className="flex-1">
                                             <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Cuota Diaria</p>
                                             <input

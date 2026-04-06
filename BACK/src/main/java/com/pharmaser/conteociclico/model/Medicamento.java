@@ -6,7 +6,7 @@ import lombok.Data;
 @Entity
 @Table(name = "medicamento")
 @Data
-@com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties({ "hibernateLazyInitializer", "handler" })
 public class Medicamento {
 
     @Id
@@ -18,6 +18,9 @@ public class Medicamento {
 
     @Column(name = "codigogenerico")
     private String codigoGenerico;
+
+    @Column(name = "tipomolecula")
+    private String tipomolecula;
 
     @Column(name = "descripcion", columnDefinition = "TEXT")
     private String descripcion;

@@ -29,6 +29,9 @@ public class Usuario {
     @Column(name = "idrol")
     private Integer idRol;
 
+    @Column(name = "tipoconteo", length = 50)
+    private String tipoConteo;
+
     @ManyToOne
     @JoinColumn(name = "idrol", insertable = false, updatable = false)
     private Rol rol;

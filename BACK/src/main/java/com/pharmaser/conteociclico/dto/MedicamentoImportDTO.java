@@ -12,4 +12,5 @@ public class MedicamentoImportDTO {
     private Integer inventario;
     private Double costo;
     private Double costoTotal;
+    private String tipomolecula;
 }

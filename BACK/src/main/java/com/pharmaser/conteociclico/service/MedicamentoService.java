@@ -55,6 +55,16 @@ public class MedicamentoService {
                 jdbcTemplate.execute(
                         "ALTER TABLE detalleconteo ADD INDEX idx_detalle_usr_fecha (idusuario, fecharegistro)");
             }
+
+            // SEGURIDAD: Agregar columnas si no existen
+            try {
+                jdbcTemplate.execute("ALTER TABLE medicamento ADD COLUMN tipomolecula VARCHAR(10) DEFAULT NULL");
+            } catch (Exception ignore) {}
+            
+            try {
+                jdbcTemplate.execute("ALTER TABLE usuario ADD COLUMN tipoconteo VARCHAR(50) DEFAULT 'TRADICIONAL'");
+            } catch (Exception ignore) {}
+
         } catch (Exception e) {
         }
     }
@@ -120,13 +130,13 @@ public class MedicamentoService {
     @org.springframework.transaction.annotation.Transactional
     public void importFromExternalData(java.util.List<MedicamentoImportDTO> items) {
 
-        String sql = "INSERT INTO medicamento (plu, idusuario, descripcion, codigogenerico, laboratorio, inventario, costo, costototal, estadodelconteo) "
+        String sql = "INSERT INTO medicamento (plu, idusuario, descripcion, codigogenerico, laboratorio, inventario, costo, costototal, tipomolecula, estadodelconteo) "
                 +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'no') " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'no') " +
                 "ON DUPLICATE KEY UPDATE " +
                 "descripcion = VALUES(descripcion), codigogenerico = VALUES(codigogenerico), laboratorio = VALUES(laboratorio), "
                 +
-                "inventario = VALUES(inventario), costo = VALUES(costo), costototal = VALUES(costototal)";
+                "inventario = VALUES(inventario), costo = VALUES(costo), costototal = VALUES(costototal), tipomolecula = VALUES(tipomolecula)";
 
         int batchSize = 10000;
         for (int i = 0; i < items.size(); i += batchSize) {
@@ -143,6 +153,7 @@ public class MedicamentoService {
                     ps.setInt(6, item.getInventario() != null ? item.getInventario() : 0);
                     ps.setDouble(7, item.getCosto() != null ? item.getCosto() : 0.0);
                     ps.setDouble(8, item.getCostoTotal() != null ? item.getCostoTotal() : 0.0);
+                    ps.setString(9, item.getTipomolecula());
                 }
 
                 @Override

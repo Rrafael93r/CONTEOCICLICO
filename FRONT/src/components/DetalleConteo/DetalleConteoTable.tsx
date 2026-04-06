@@ -122,6 +122,14 @@ const DetalleConteoTable: React.FC = () => {
                         !currentIdsInTable.includes(Number(m.id))
                     );
 
+                    // APLICAR FILTRO POR TIPO DE MOLÉCULA SI EL USUARIO TIENE UN TIPO ESPECÍFICO (A, B, o C)
+                    const userType = currentUser.tipoConteo?.toUpperCase();
+                    if (userType && ['A', 'B', 'C'].includes(userType)) {
+                        pendingMeds = pendingMeds.filter(m => 
+                            m.tipomolecula?.toUpperCase() === userType
+                        );
+                    }
+
                     // Lógica mejorada: Si no hay suficientes, reservamos los actuales y reiniciamos para completar
                     let medsToProcess = [];
                     const initialUniqueCodes = new Set(pendingMeds.map(m => m.codigoGenerico)).size;

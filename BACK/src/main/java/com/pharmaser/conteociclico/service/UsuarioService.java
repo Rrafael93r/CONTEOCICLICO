@@ -43,6 +43,7 @@ public class UsuarioService {
             if (usuario.getUsuario() != null) existingUser.setUsuario(usuario.getUsuario());
             if (usuario.getSede() != null) existingUser.setSede(usuario.getSede());
             if (usuario.getNumeroConteo() != null) existingUser.setNumeroConteo(usuario.getNumeroConteo());
+            if (usuario.getTipoConteo() != null) existingUser.setTipoConteo(usuario.getTipoConteo());
             return usuarioRepository.save(existingUser);
         }).orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
     }
