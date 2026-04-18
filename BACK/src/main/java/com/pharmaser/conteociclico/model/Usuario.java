@@ -2,6 +2,8 @@ package com.pharmaser.conteociclico.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.time.LocalTime;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity
 @Table(name = "usuario")
@@ -23,14 +25,12 @@ public class Usuario {
     @Column(name = "sede", length = 45)
     private String sede;
 
-    @Column(name = "numeroconteo")
-    private Integer numeroConteo;
-
     @Column(name = "idrol")
+    @JsonProperty("idRol")
     private Integer idRol;
 
-    @Column(name = "tipoconteo", length = 50)
-    private String tipoConteo;
+    @Column(name = "fecha_bloque_extra")
+    private java.time.LocalDate fechaBloqueExtra;
 
     @ManyToOne
     @JoinColumn(name = "idrol", insertable = false, updatable = false)

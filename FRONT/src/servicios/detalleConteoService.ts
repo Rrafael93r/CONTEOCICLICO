@@ -9,9 +9,7 @@ export interface DetalleConteo {
     medicamento?: {
         id: number;
         plu: string;
-        codigoGenerico: string;
         descripcion: string;
-        laboratorio: string;
         estadoDelConteo?: string;
     };
     usuario?: {

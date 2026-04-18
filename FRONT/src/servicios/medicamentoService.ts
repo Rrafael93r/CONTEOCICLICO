@@ -6,14 +6,15 @@ export interface Medicamento {
     id: number;
     plu: string;
     descripcion: string;
-    codigoGenerico: string;
-    laboratorio: string;
     estadoDelConteo: string;
     tipomolecula?: string;
     idUsuario?: number;
     inventario?: number;
     costo?: number;
     costoTotal?: number;
+    ciclosmes?: number;
+    estadoConteoMensual?: number;
+    contadoMesAnterior?: boolean;
 }
 
 export const getAllMedicamentos = async (idUsuario?: number): Promise<Medicamento[]> => {
@@ -52,9 +53,36 @@ export const bulkUpdateInventory = async (items: any[]) => {
     }
 };
 
+export const syncInventoryData = async (items: any[]) => {
+    try {
+        const response = await axios.post(`${API_URL}/sync`, items);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
 export const resetCycleByUsuario = async (idUsuario: number) => {
     try {
         const response = await axios.post(`${API_URL}/reset-cycle/${idUsuario}`);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const resetCycleByUsuarioAndTipo = async (idUsuario: number, tipo: string) => {
+    try {
+        const response = await axios.post(`${API_URL}/reset-cycle/${idUsuario}/${tipo}`);
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
+export const resetAllCyclesGlobal = async () => {
+    try {
+        const response = await axios.post(`${API_URL}/reset-all-cycles`);
         return response.data;
     } catch (error) {
         throw error;
@@ -68,4 +96,19 @@ export const bulkUpdateMedicamentoStatus = async (ids: number[]) => {
     } catch (error) {
         throw error;
     }
+};
+
+export const getMedicamentoSummary = async (): Promise<any[]> => {
+    const response = await axios.get(`${API_URL}/summary`);
+    return response.data;
+};
+
+export const getDashboardStats = async (): Promise<any> => {
+    const response = await axios.get(`${API_URL}/dashboard-stats`);
+    return response.data;
+};
+
+export const searchMedicamentos = async (q: String, limit = 50): Promise<Medicamento[]> => {
+    const response = await axios.get(`${API_URL}/search`, { params: { q, limit } });
+    return response.data;
 };

@@ -32,12 +32,8 @@ public class ApiKeyFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Permitir endpoints públicos de autenticación
-        String requestUri = request.getRequestURI();
-        if ("/api/auth/login".equals(requestUri)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
+        // Permitir endpoints públicos (Solo los que no requieren ni token ni API Key - actualmente ninguno)
+        // Eliminada excepción de login para forzar uso de API Key incluso al autenticarse
 
         // Si la petición trae un JWT Bearer token, dejarlo pasar al JwtRequestFilter
         String authHeader = request.getHeader("Authorization");

@@ -7,5 +7,6 @@ import java.util.Optional;
 public interface UsuarioRepository extends JpaRepository<Usuario, Integer> {
     Optional<Usuario> findByUsuario(String usuario);
     Optional<Usuario> findByUsuarioIgnoreCase(String usuario);
-    Optional<Usuario> findBySede(String sede);
+    java.util.List<Usuario> findBySede(String sede);
+    java.util.List<Usuario> findBySedeAndIdRol(String sede, Integer idRol);
 }

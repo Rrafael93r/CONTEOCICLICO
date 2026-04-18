@@ -15,6 +15,9 @@ public class DetalleConteoService {
 
     @Autowired
     private DetalleConteoRepository detalleConteoRepository;
+    
+    @Autowired
+    private MedicamentoService medicamentoService;
 
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
@@ -123,6 +126,15 @@ public class DetalleConteoService {
                     ps.setObject(1, item.getCantidadContada());
                     ps.setObject(2, item.getHoraRegistro());
                     ps.setObject(3, item.getId());
+                    
+                    // Sincronizar con tabla medicamento si hay cantidad contada
+                    if (item.getCantidadContada() != null && item.getIdMedicamento() != null) {
+                        try {
+                            medicamentoService.marcarComoContado(item.getIdMedicamento(), item.getCantidadContada().doubleValue());
+                        } catch (Exception e) {
+                            // Log error but continue batch
+                        }
+                    }
                 }
 
                 @Override

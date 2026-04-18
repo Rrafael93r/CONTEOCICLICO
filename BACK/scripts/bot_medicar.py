@@ -1,0 +1,140 @@
+from playwright.sync_api import sync_playwright, TimeoutError
+from dotenv import load_dotenv
+import os
+import sys
+
+# =========================
+# CONFIGURACIÓN
+# =========================
+# Intentar cargar .env desde el directorio padre (raíz del proyecto BACK) 
+# si no están las variables ya en el entorno
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+load_dotenv(env_path)
+
+USUARIO_ID = os.getenv("USUARIO_ID")
+LOGIN = os.getenv("LOGIN")
+PASSWORD = os.getenv("PASSWORD")
+RUTA_DESCARGA = os.getenv("RUTA_DESCARGA", r"C:\Botmedicar")
+
+URL_LOGIN = "https://medicar.sis-colombia.com/pharmaser/mutualser/"
+URL_INVENTARIO = "https://medicar.sis-colombia.com/pharmaser/mutualser/el_admin/inventario/seguimiento/inventario.php"
+
+# =========================
+# VALIDACIONES
+# =========================
+def validar_config():
+    if not os.path.exists(RUTA_DESCARGA):
+        os.makedirs(RUTA_DESCARGA)
+
+# =========================
+# LOGIN
+# =========================
+def login(page):
+    print("Iniciando sesion silenciosa...")
+    page.goto(URL_LOGIN)
+    page.wait_for_selector("input[placeholder='Identificación']")
+    
+    page.locator("input[placeholder='Identificación']").first.fill(USUARIO_ID)
+    page.locator("input[placeholder='Login']").first.fill(LOGIN)
+    page.locator("input[type='password']").first.fill(PASSWORD)
+
+    with page.expect_navigation():
+        page.keyboard.press("Enter")
+    page.wait_for_load_state("networkidle")
+
+# =========================
+# ACEPTAR TERMINOS
+# =========================
+def aceptar_terminos(page):
+    try:
+        page.locator("text=Aceptar").click(timeout=5000)
+        print("Acceso concedido")
+    except TimeoutError:
+        pass
+
+# =========================
+# IR A INVENTARIO
+# =========================
+def ir_inventario(page):
+    print("Accediendo al modulo de inventario...")
+    page.goto(URL_INVENTARIO)
+
+# =========================
+# EXPORTAR (MODO AUTOMÁTICO)
+# =========================
+def exportar_inventario(page):
+    boton = page.locator('input[name="boton_exportar"][value="Exportar"]')
+    if boton.count() == 0:
+        print("Error: No se encontro el boton de exportar.")
+        return
+
+    # Manejar posibles alertas
+    page.on("dialog", lambda dialog: dialog.accept())
+
+    try:
+        # Abrir pestaña de procesamiento
+        with page.context.expect_page(timeout=60000) as new_page_info:
+            boton.click(force=True)
+        
+        new_page = new_page_info.value
+        print("Generando archivo en el servidor (esto puede tardar unos minutos)...")
+
+        # Esperar la descarga real al llegar al 100%
+        with new_page.expect_download(timeout=300000) as download_info:
+            pass
+        
+        download = download_info.value
+        # Nombre de archivo fijo para reemplazar el anterior
+        ruta = os.path.join(RUTA_DESCARGA, "inventario.xls")
+        
+        # Guardar (sobrescribe automáticamente)
+        download.save_as(ruta)
+        
+        print(f"EXITO: Inventario actualizado correctamente en: {ruta}")
+        new_page.close()
+
+    except Exception as e:
+        print(f"Error durante la exportacion: {e}")
+        sys.exit(1)
+
+# =========================
+# MAIN
+# =========================
+def run():
+    validar_config()
+    
+    # Asegurar que la salida use UTF-8 para evitar errores de codificación en Windows
+    try:
+        import sys
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
+    except:
+        pass
+
+    with sync_playwright() as p:
+        # Ejecución en segundo plano (headless=True)
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+
+        try:
+            login(page)
+            aceptar_terminos(page)
+            ir_inventario(page)
+            
+            page.wait_for_selector('input[name="boton_exportar"]', timeout=30000)
+            exportar_inventario(page)
+
+        except Exception as e:
+            print(f"Error en el proceso automatico: {e}")
+            sys.exit(1)
+
+        # Cierre inmediato al terminar
+        browser.close()
+        print("Proceso finalizado.")
+
+# =========================
+# EJECUCIÓN
+# =========================
+if __name__ == "__main__":
+    run()

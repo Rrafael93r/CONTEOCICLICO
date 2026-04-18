@@ -35,11 +35,20 @@ const Login = () => {
           confirmButtonColor: '#f6952c'
         });
       }
-    } catch (err) {
+    } catch (err: any) {
+      let errorMessage = 'Usuario o contraseña incorrectos. Por favor intenta de nuevo.';
+      
+      // Si el servidor nos mandó un mensaje específico (como el de restricción de horario)
+      if (err.response && err.response.data) {
+        errorMessage = typeof err.response.data === 'string' 
+          ? err.response.data 
+          : (err.response.data.message || errorMessage);
+      }
+
       Swal.fire({
         icon: 'error',
         title: 'Acceso Denegado',
-        text: 'Usuario o contraseña incorrectos. Por favor intenta de nuevo.',
+        text: errorMessage,
         background: '#fff',
         confirmButtonColor: '#f6952c'
       });

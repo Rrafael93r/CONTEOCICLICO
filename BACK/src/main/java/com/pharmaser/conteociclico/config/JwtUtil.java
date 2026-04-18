@@ -16,8 +16,19 @@ import java.util.function.Function;
 @Component
 public class JwtUtil {
 
-    // Generar una clave segura para HS256
-    private final Key SECRET_KEY = Keys.secretKeyFor(SignatureAlgorithm.HS256);
+    @org.springframework.beans.factory.annotation.Value("${jwt.secret:pharmaser_secret_key_2026_default_long_string_for_security}")
+    private String secret;
+
+    private Key getSigningKey() {
+        byte[] keyBytes = secret.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        // Asegurarse de que la llave tenga al menos 256 bits (32 bytes) para HS256
+        if (keyBytes.length < 32) {
+            byte[] padded = new byte[32];
+            System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
+            return Keys.hmacShaKeyFor(padded);
+        }
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
 
     // Extraer el username del token
     public String extractUsername(String token) {
@@ -36,7 +47,7 @@ public class JwtUtil {
 
     private Claims extractAllClaims(String token) {
         return Jwts.parserBuilder()
-                .setSigningKey(SECRET_KEY)
+                .setSigningKey(getSigningKey())
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
@@ -57,9 +68,8 @@ public class JwtUtil {
                 .setClaims(claims)
                 .setSubject(subject)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                // El token expira en 10 horas
                 .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10))
-                .signWith(SECRET_KEY)
+                .signWith(getSigningKey())
                 .compact();
     }
 

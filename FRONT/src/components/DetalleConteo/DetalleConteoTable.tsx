@@ -107,102 +107,19 @@ const DetalleConteoTable: React.FC = () => {
                 return d;
             });
 
-            // 3. GENERAR TAREA CÍCLICA SI ES LA PRIMERA VEZ DE HOY
-            const isFirstLoadOfToday = !hoyUserDetalles.some(d => d.tipoConteo === 'Cíclico');
+            // 3. GENERAR TAREA CÍCLICA SI ES LA PRIMERA VEZ DE HOY O SI YA COMPLETÓ EL BLOQUE ACTUAL
+            const cyclicTasks = hoyUserDetalles.filter(d => d.tipoConteo === 'Cíclico');
+            const isFirstLoadOfToday = cyclicTasks.length === 0;
+            const allCyclicCompleted = cyclicTasks.length > 0 && cyclicTasks.every(d => d.cantidadContada !== null);
 
-            if (isFirstLoadOfToday) {
-                const quota = currentUser.numeroConteo !== undefined ? currentUser.numeroConteo : 10;
-                if (quota > 0) {
-                    // EXCLUIR MEDICAMENTOS QUE YA ESTÁN EN LA TABLA DE HOY (COMO PERSONALIZADOS)
-                    const currentIdsInTable = hoyUserDetalles.map(d => Number(d.idMedicamento || d.medicamento?.id));
-
-                    let pendingMeds = allMedsForLookup.filter(m =>
-                        m.idUsuario === currentUser.id &&
-                        m.estadoDelConteo?.toLowerCase() === 'no' &&
-                        !currentIdsInTable.includes(Number(m.id))
-                    );
-
-                    // APLICAR FILTRO POR TIPO DE MOLÉCULA SI EL USUARIO TIENE UN TIPO ESPECÍFICO (A, B, o C)
-                    const userType = currentUser.tipoConteo?.toUpperCase();
-                    if (userType && ['A', 'B', 'C'].includes(userType)) {
-                        pendingMeds = pendingMeds.filter(m => 
-                            m.tipomolecula?.toUpperCase() === userType
-                        );
-                    }
-
-                    // Lógica mejorada: Si no hay suficientes, reservamos los actuales y reiniciamos para completar
-                    let medsToProcess = [];
-                    const initialUniqueCodes = new Set(pendingMeds.map(m => m.codigoGenerico)).size;
-
-                    if (initialUniqueCodes < quota) {
-
-                        // 1. Guardamos los IDs de los que ya estaban pendientes para darles prioridad
-                        const oldPendingIds = pendingMeds.map(m => m.id);
-
-                        // 2. Reiniciamos el ciclo en el servidor
-                        await resetCycleByUsuario(currentUser.id);
-
-                        // 3. Obtenemos el catálogo refrescado
-                        const refreshedMeds = await getAllMedicamentos(currentUser.id);
-
-                        // 4. Los "nuevos" candidatos son los que no estaban en el grupo de pendientes originales
-                        // (y que obviamente no estén ya en la tabla de hoy)
-                        const additionalCandidates = refreshedMeds.filter(m =>
-                            m.idUsuario === currentUser.id &&
-                            !oldPendingIds.includes(m.id) &&
-                            !currentIdsInTable.includes(Number(m.id))
-                        ).sort((a, b) => (b.costoTotal || 0) - (a.costoTotal || 0));
-
-                        // Unimos: Primero los rezagados del ciclo anterior, luego el resto por costo
-                        medsToProcess = [...pendingMeds, ...additionalCandidates];
-                    } else {
-                        // Si hay suficientes, simplemente ordenamos los pendientes por costo
-                        medsToProcess = [...pendingMeds].sort((a, b) => (b.costoTotal || 0) - (a.costoTotal || 0));
-                    }
-
-                    if (medsToProcess.length > 0) {
-                        const uniqueProductCodes = new Set<string>();
-                        const selectedMeds: Medicamento[] = [];
-
-                        for (const med of medsToProcess) {
-                            // Si es una molécula que ya incluimos en la selección de hoy, la agregamos (si hay stock)
-                            if (uniqueProductCodes.has(med.codigoGenerico)) {
-                                if (med.inventario > 0) selectedMeds.push(med);
-                                continue;
-                            }
-
-                            // Si es una nueva molécula y aún no llegamos a la cuota, la incluimos
-                            if (uniqueProductCodes.size < quota) {
-                                if (med.inventario > 0) {
-                                    uniqueProductCodes.add(med.codigoGenerico);
-                                    selectedMeds.push(med);
-                                }
-                            } else {
-                                // Ya completamos la cuota de moléculas únicas
-                                break;
-                            }
-                        }
-
-                        if (selectedMeds.length > 0) {
-                            const bulkPayload = selectedMeds.map(m => ({
-                                idMedicamento: m.id,
-                                idUsuario: currentUser.id,
-                                cantidadContada: null,
-                                cantidadActual: m.inventario || 0,
-                                fechaRegistro: fechaHoy,
-                                horaRegistro: null,
-                                tipoConteo: 'Cíclico'
-                            }));
-
-                            await Promise.all([
-                                bulkCreateDetalles(bulkPayload as any),
-                                bulkUpdateMedicamentoStatus(selectedMeds.map(m => m.id))
-                            ]);
-
-                            const updatedRaw = await getAllDetalles(currentUser.id, fechaHoy);
-                            hoyUserDetalles = updatedRaw.filter(d => normalizeDate(d.fechaRegistro) === fechaHoy);
-                        }
-                    }
+            if (isFirstLoadOfToday || allCyclicCompleted) {
+                const currentIdsInTable = hoyUserDetalles.map(d => Number(d.idMedicamento || d.medicamento?.id));
+                const { generateABCBlock } = await import('../../utils/cycleGenerator');
+                const generatedMeds = await generateABCBlock(currentUser, allMedsForLookup, currentIdsInTable, fechaHoy);
+                
+                if (generatedMeds.length > 0) {
+                    const updatedRaw = await getAllDetalles(currentUser.id, fechaHoy);
+                    hoyUserDetalles = updatedRaw.filter(d => normalizeDate(d.fechaRegistro) === fechaHoy);
                 }
             }
 
@@ -296,8 +213,7 @@ const DetalleConteoTable: React.FC = () => {
 
         return normalizeDate(d.fechaRegistro) === today && d.cantidadContada === null && (
             (d.medicamento?.descripcion.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-            (d.medicamento?.plu || '').includes(searchTerm) ||
-            (d.medicamento?.codigoGenerico.toLowerCase() || '').includes(searchTerm.toLowerCase())
+            (d.medicamento?.plu || '').includes(searchTerm)
         );
     });
 
@@ -336,8 +252,6 @@ const DetalleConteoTable: React.FC = () => {
                         <thead>
                             <tr className="bg-gray-50/50">
                                 <th className="px-8 py-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Medicamento / PLU</th>
-                                <th className="px-8 py-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Laboratorio</th>
-                                <th className="px-8 py-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic w-32">Código</th>
                                 <th className="px-8 py-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic w-48">Contado</th>
                                 <th className="px-8 py-6 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Estado</th>
                             </tr>
@@ -358,12 +272,6 @@ const DetalleConteoTable: React.FC = () => {
                                                 </div>
                                             </div>
                                         </div>
-                                    </td>
-                                    <td className="px-8 py-8 text-center text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
-                                        {d.medicamento?.laboratorio}
-                                    </td>
-                                    <td className="px-8 py-8 text-center">
-                                        <span className="text-xs font-black text-orange-500 italic bg-orange-50 px-3 py-1.5 rounded-lg border border-orange-100">{d.medicamento?.codigoGenerico}</span>
                                     </td>
                                     <td className="px-8 py-8">
                                         {d.cantidadContada !== null ? (
@@ -402,7 +310,6 @@ const DetalleConteoTable: React.FC = () => {
                                 <h4 className="text-base font-black text-gray-900 leading-tight mb-2 uppercase">{d.medicamento?.descripcion}</h4>
                                 <div className="flex flex-wrap gap-2 items-center">
                                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded-lg">PLU: {d.medicamento?.plu}</span>
-                                    <span className="text-[10px] font-black text-orange-500 bg-orange-50 px-2 py-1 rounded-lg uppercase border border-orange-100">CÓD: {d.medicamento?.codigoGenerico}</span>
                                     <span className="text-[9px] font-bold text-gray-400 italic">Asignado: {normalizeDate(d.fechaRegistro)}</span>
                                 </div>
                             </div>
@@ -420,10 +327,6 @@ const DetalleConteoTable: React.FC = () => {
                         </div>
 
                         <div className="space-y-4 border-t border-gray-50 pt-4">
-                            <div className="flex items-center justify-between text-[11px] font-bold uppercase text-gray-400">
-                                <span>Laboratorio:</span>
-                                <span className="text-gray-600">{d.medicamento?.laboratorio}</span>
-                            </div>
                             <div className="pt-2">
                                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block text-center">Cantidad Física Contada</label>
                                 {d.cantidadContada !== null ? (

@@ -25,7 +25,7 @@ public class DetalleConteo {
     @Column(name = "idusuario")
     private Integer idUsuario;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "idusuario", insertable = false, updatable = false)
     private Usuario usuario;
 

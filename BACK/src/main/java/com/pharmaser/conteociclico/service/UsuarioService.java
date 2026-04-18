@@ -42,8 +42,9 @@ public class UsuarioService {
         return usuarioRepository.findById(id).map((@NonNull Usuario existingUser) -> {
             if (usuario.getUsuario() != null) existingUser.setUsuario(usuario.getUsuario());
             if (usuario.getSede() != null) existingUser.setSede(usuario.getSede());
-            if (usuario.getNumeroConteo() != null) existingUser.setNumeroConteo(usuario.getNumeroConteo());
-            if (usuario.getTipoConteo() != null) existingUser.setTipoConteo(usuario.getTipoConteo());
+            if (usuario.getFechaBloqueExtra() != null) {
+                existingUser.setFechaBloqueExtra(usuario.getFechaBloqueExtra());
+            }
             return usuarioRepository.save(existingUser);
         }).orElseThrow(() -> new RuntimeException("Usuario no encontrado"));
     }

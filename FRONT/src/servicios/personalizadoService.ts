@@ -10,8 +10,6 @@ export interface Personalizado {
         id: number;
         plu: string;
         descripcion: string;
-        codigoGenerico: string;
-        laboratorio: string;
         inventario: number;
     };
     usuario?: {

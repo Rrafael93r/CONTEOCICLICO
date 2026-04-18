@@ -7,11 +7,12 @@ export interface Usuario {
     usuario: string;
     sede: string;
     numeroConteo?: number;
-    tipoConteo?: string;
     rol?: {
         id: number;
         nombre: string;
     };
+    idRol?: number;
+    fechaBloqueExtra?: string;
 }
 
 export const getAllUsuarios = async (): Promise<Usuario[]> => {

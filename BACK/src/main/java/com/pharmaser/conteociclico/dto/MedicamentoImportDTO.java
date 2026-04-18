@@ -6,11 +6,11 @@ import lombok.Data;
 public class MedicamentoImportDTO {
     private String plu;
     private String descripcion;
-    private String codigoGenerico;
-    private String laboratorio;
     private Integer idUsuario;
     private Integer inventario;
     private Double costo;
     private Double costoTotal;
     private String tipomolecula;
+    private Integer reglaAplicadaId;
+    private java.time.LocalDateTime fechaClasificacion;
 }
