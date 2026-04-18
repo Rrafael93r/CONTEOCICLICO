@@ -353,6 +353,7 @@ public class MedicamentoService {
         com.pharmaser.conteociclico.model.LogClasificacionAbc log = new com.pharmaser.conteociclico.model.LogClasificacionAbc();
         log.setFechaEjecucion(java.time.LocalDateTime.now());
 
+        java.util.List<Integer> sedes = new java.util.ArrayList<>();
         try {
             if (!acquireDistributedLock()) {
                 return;
@@ -378,7 +379,7 @@ public class MedicamentoService {
             log.setVersionReglas(java.util.Objects.hash(threshA, threshB));
 
             // 3. Obtener todas las sedes con medicamentos
-            java.util.List<Integer> sedes = jdbcTemplate.queryForList(
+            sedes = jdbcTemplate.queryForList(
                     "SELECT DISTINCT idusuario FROM medicamento WHERE idusuario IS NOT NULL", Integer.class);
 
             int totalA = 0, totalB = 0, totalC = 0;
