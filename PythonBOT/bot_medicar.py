@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 import os
 import sys
 import paramiko
+import datetime
+
+def log(msg):
+    print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
 # =========================
 # CONFIGURACIÓN
@@ -33,12 +37,13 @@ URL_INVENTARIO = "https://medicar.sis-colombia.com/pharmaser/mutualser/el_admin/
 def validar_config():
     if not os.path.exists(RUTA_DESCARGA):
         os.makedirs(RUTA_DESCARGA)
+        log(f"Carpeta de descarga creada: {RUTA_DESCARGA}")
 
 # =========================
 # LOGIN
 # =========================
 def login(page):
-    print("Iniciando sesion silenciosa...")
+    log("Iniciando sesion silenciosa...")
     page.goto(URL_LOGIN)
     page.wait_for_selector("input[placeholder='Identificación']")
     
@@ -56,7 +61,7 @@ def login(page):
 def aceptar_terminos(page):
     try:
         page.locator("text=Aceptar").click(timeout=5000)
-        print("Acceso concedido")
+        log("Acceso concedido")
     except TimeoutError:
         pass
 
@@ -64,7 +69,7 @@ def aceptar_terminos(page):
 # IR A INVENTARIO
 # =========================
 def ir_inventario(page):
-    print("Accediendo al modulo de inventario...")
+    log("Accediendo al modulo de inventario...")
     page.goto(URL_INVENTARIO)
 
 # =========================
@@ -73,7 +78,7 @@ def ir_inventario(page):
 def exportar_inventario(page):
     boton = page.locator('input[name="boton_exportar"][value="Exportar"]')
     if boton.count() == 0:
-        print("Error: No se encontro el boton de exportar.")
+        log("Error: No se encontro el boton de exportar.")
         return
 
     # Manejar posibles alertas
@@ -85,38 +90,50 @@ def exportar_inventario(page):
             boton.click(force=True)
         
         new_page = new_page_info.value
-        print("Generando archivo en el servidor (esto puede tardar unos minutos)...")
+        log("Generando archivo en el servidor (esto puede tardar unos minutos)...")
 
         # Esperar la descarga real al llegar al 100%
         with new_page.expect_download(timeout=300000) as download_info:
             pass
         
         download = download_info.value
-        # Nombre de archivo fijo para reemplazar el anterior
-        ruta = os.path.join(RUTA_DESCARGA, "inventario.xls")
         
-        # Guardar (sobrescribe automáticamente)
-        download.save_as(ruta)
-        print(f"EXITO: Inventario actualizado correctamente en: {ruta}")
+        # Rutas: temporal y final
+        ruta_final = os.path.join(RUTA_DESCARGA, "inventario.xls")
+        ruta_temp = os.path.join(RUTA_DESCARGA, "inventario.xls.tmp")
         
-        # Subir a SFTP
-        subir_a_sftp(ruta)
+        # Guardar primero en archivo temporal
+        download.save_as(ruta_temp)
+        log(f"Archivo descargado temporalmente en: {ruta_temp}")
+        
+        # Subir a SFTP desde el temporal
+        subir_a_sftp(ruta_temp)
+        
+        # Solo si todo salio bien, reemplazar el archivo definitivo
+        os.replace(ruta_temp, ruta_final)
+        log(f"EXITO: Inventario actualizado correctamente en: {ruta_final}")
         
         new_page.close()
 
     except Exception as e:
-        print(f"Error durante la exportacion: {e}")
-        sys.exit(1)
+        # Limpiar archivo temporal si quedo a medio descargar
+        ruta_temp = os.path.join(RUTA_DESCARGA, "inventario.xls.tmp")
+        if os.path.exists(ruta_temp):
+            os.remove(ruta_temp)
+            log("Archivo temporal incompleto eliminado.")
+        
+        log(f"Error durante la exportacion: {e}")
+        raise
 
 # =========================
 # SUBIR A SFTP
 # =========================
 def subir_a_sftp(ruta_local):
     if not SFTP_HOST:
-        print("Aviso: SFTP_HOST no configurado, omitiendo subida.")
+        log("Aviso: SFTP_HOST no configurado, omitiendo subida.")
         return
 
-    print(f"Iniciando subida por SFTP a {SFTP_HOST}...")
+    log(f"Iniciando subida por SFTP a {SFTP_HOST}...")
     transport = None
     try:
         transport = paramiko.Transport((SFTP_HOST, SFTP_PORT))
@@ -128,17 +145,15 @@ def subir_a_sftp(ruta_local):
         nombre_archivo = os.path.basename(ruta_local)
         ruta_remota = os.path.join(SFTP_REMOTE_PATH, nombre_archivo).replace("\\", "/")
         
-        print(f"Subiendo {nombre_archivo} -> {ruta_remota}")
+        log(f"Subiendo {nombre_archivo} -> {ruta_remota}")
         sftp.put(ruta_local, ruta_remota)
         
         sftp.close()
-        print("Subida SFTP completada exitosamente.")
-
-        # Opcional: Borrar archivo local tras subirlo
-        # os.remove(ruta_local)
+        log("Subida SFTP completada exitosamente.")
 
     except Exception as e:
-        print(f"Error en SFTP: {e}")
+        log(f"Error en SFTP: {e}")
+        raise  # Re-lanzar para que el llamador sepa que fallo
     finally:
         if transport:
             transport.close()
@@ -147,9 +162,10 @@ def subir_a_sftp(ruta_local):
 # MAIN
 # =========================
 def run():
+    log("=== INICIO DE EJECUCION ===")
     validar_config()
     
-    # Asegurar que la salida use UTF-8 para evitar errores de codificación en Windows
+    # Asegurar que la salida use UTF-8 para evitar errores de codificación
     try:
         import sys
         if hasattr(sys.stdout, 'reconfigure'):
@@ -172,12 +188,13 @@ def run():
             exportar_inventario(page)
 
         except Exception as e:
-            print(f"Error en el proceso automatico: {e}")
-            sys.exit(1)
+            log(f"Error en el proceso automatico: {e}")
+            browser.close()
+            raise
 
         # Cierre inmediato al terminar
         browser.close()
-        print("Proceso finalizado.")
+        log("=== PROCESO FINALIZADO ===")
 
 # =========================
 # EJECUCIÓN
