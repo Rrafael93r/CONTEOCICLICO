@@ -12,3 +12,4 @@ config:
   conteo_ciclico:region: iad
   conteo_ciclico:repoBack: conteo_ciclico_back
   conteo_ciclico:repoFront: conteo_ciclico_front
+  conteo_ciclico:repoPythonBot: bot_medicar

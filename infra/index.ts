@@ -11,6 +11,7 @@ const namespace = config.require("namespace");
 
 const repoBack = config.require("repoBack");
 const repoFront = config.require("repoFront");
+const repoPythonBot = config.require("repoPythonBot");
 
 const authToken = config.requireSecret("authToken");
 const certificateId = config.requireSecret("certificateId");
@@ -20,11 +21,102 @@ const ad = oci.identity.getAvailabilityDomainOutput({
     adNumber: 1,
 });
 
+
+// BOT
+const botImage = new docker.Image("bot-image", {
+    build: {
+        context: "../PythonBOT",
+        dockerfile: "../PythonBOT/Dockerfile",
+        platform: "linux/amd64",
+    },
+    imageName: pulumi.interpolate`${region}.ocir.io/${namespace}/${repoPythonBot}:latest`,
+    registry: {
+        server: pulumi.interpolate`${region}.ocir.io`,
+        username: pulumi.interpolate`${namespace}/develop@pharmaser.com.co`,
+        password: authToken,
+    },
+});
+
+const botContainerInstance = new oci.containerengine.ContainerInstance("bot-instance", {
+    compartmentId: compartmentId,
+    displayName: "bot-instance",
+    availabilityDomain: ad.name,
+    shape: "CI.Standard.E4.Flex",
+    shapeConfig: {
+        ocpus: 1,
+        memoryInGbs: 2,
+    },
+    vnics: [{
+        subnetId: privateSubnetId,
+        isPublicIpAssigned: false,
+    }],
+    containers: [{
+        imageUrl: botImage.imageName,
+        displayName: "bot-container",
+        environmentVariables: {
+            USUARIO_ID: "8060118118",
+            LOGIN: "1050946629M",
+            PASSWORD: "Pharmaser*2025",
+            RUTA_DESCARGA: "/app/downloads",
+            SFTP_HOST: "sftp.pharmaser.com.co",
+            SFTP_USER: "cporto",
+            SFTP_PASSWORD: "Ph@rm4s3r.",
+            SFTP_REMOTE_PATH: "/medicar/ciclicoinventario"
+        },
+    }],
+});
+
+const botLb = new oci.loadbalancer.LoadBalancer("bot-lb", {
+    compartmentId: compartmentId,
+    displayName: "bot-lb",
+    shape: "flexible",
+    subnetIds: [publicSubnetId],
+    shapeDetails: {
+        maximumBandwidthInMbps: 100,
+        minimumBandwidthInMbps: 10
+    },
+});
+
+const botBackendset = new oci.loadbalancer.BackendSet("bot-backend-set", {
+    loadBalancerId: botLb.id,
+    name: "bot-backend-set",
+    policy: "ROUND_ROBIN",
+    healthChecker: {
+        protocol: "HTTP",
+        urlPath: "/status",
+        port: 8000,
+        returnCode: 200,
+    }
+});
+
+const botListener = new oci.loadbalancer.Listener("bot-listener", {
+    loadBalancerId: botLb.id,
+    name: "bot-listener",
+    defaultBackendSetName: botBackendset.name,
+    port: 443,
+    protocol: "HTTP",
+    sslConfiguration: {
+        certificateIds: [certificateId],
+        verifyPeerCertificate: false,
+    }
+});
+
+const botBackend = new oci.loadbalancer.Backend("bot-backend", {
+    loadBalancerId: botLb.id,
+    backendsetName: botBackendset.name,
+    ipAddress: botContainerInstance.vnics.apply(vnics => vnics[0].privateIp),
+    port: 8000,
+    backup: false,
+    drain: false,
+    offline: false,
+    weight: 1,
+});
+
 // Backend
 const backendImage = new docker.Image("conteo_api-image", {
     build: {
-        context: "../code/BACK",
-        dockerfile: "../code/BACK/Dockerfile",
+        context: "../BACK",
+        dockerfile: "../BACK/Dockerfile",
         platform: "linux/amd64",
     },
     imageName: pulumi.interpolate`${region}.ocir.io/${namespace}/${repoBack}:latest`,
@@ -52,9 +144,20 @@ const backendContainerInstance = new oci.containerengine.ContainerInstance("cont
         imageUrl: backendImage.imageName,
         displayName: "conteo_api-container",
         environmentVariables: {
-            APP_API_KEY: "PHARMASER_ZAFIRO_RROJAS_CPORTO",
-            VALIDAR_PASSWORD: "Ph4rM453rPr3Vr3N41",
-            JWT_SECRET: "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970"
+            APP_AUTO_IMPORT_ENABLED: "true",
+            APP_AUTO_IMPORT_DELETE_AFTER_SUCCESS: "true",
+            // Database Configuration
+            DB_URL: "jdbc:mysql://10.0.1.115:3306/conteociclico?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=America/Bogota&zeroDateTimeBehavior=convertToNull&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&useServerPrepStmts=true",
+            DB_USER: "admin",
+            DB_PASSWORD: "Adm1n*.2024/",
+            API_KEY: "pharmaser_secure_api_key_2026",
+            JWT_SECRET: "super_secret_production_key_change_me_123456789",
+            // SFTP configuration
+            SFTP_HOST: "ftpharmaser.pharmaser.com.co",
+            SFTP_USER: "cporto",
+            SFTP_PASSWORD: "Ph@rm4s3r.",
+            SFTP_PORT: 22,
+            SFTP_REMOTE_PATH: "/medicar/ciclicoinventario"
         },
     }],
 });
@@ -106,10 +209,10 @@ const backendBackend = new oci.loadbalancer.Backend("conteo_api-backend", {
 });
 
 // Frontend
-const frontendImage = new docker.Image("zafiro-ui-image", {
+const frontendImage = new docker.Image("conteo_ui-image", {
     build: {
-        context: "../code/zafiro.ui",
-        dockerfile: "../code/zafiro.ui/Dockerfile",
+        context: "../FRONT",
+        dockerfile: "../FRONT/Dockerfile",
         platform: "linux/amd64",
     },
     imageName: pulumi.interpolate`${region}.ocir.io/${namespace}/${repoFront}:latest`,
@@ -120,9 +223,9 @@ const frontendImage = new docker.Image("zafiro-ui-image", {
     },
 });
 
-const frontendContainerInstance = new oci.containerengine.ContainerInstance("zafiro-ui-instance", {
+const frontendContainerInstance = new oci.containerengine.ContainerInstance("conteo_ui-instance", {
     compartmentId: compartmentId,
-    displayName: "zafiro-ui-instance",
+    displayName: "conteo_ui-instance",
     availabilityDomain: ad.name,
     shape: "CI.Standard.E4.Flex",
     shapeConfig: {
@@ -135,22 +238,17 @@ const frontendContainerInstance = new oci.containerengine.ContainerInstance("zaf
     }],
     containers: [{
         imageUrl: frontendImage.imageName,
-        displayName: "zafiro-ui-container",
+        displayName: "conteo_ui-container",
         environmentVariables: {
-            VITE_API_URL: "https://apizafiro.pharmaser.com.co",
-            VITE_API_KEY: "PHARMASER_ZAFIRO_RROJAS_CPORTO",
-            VITE_PROXY_URL: "https://apizafiro.pharmaser.com.co/proxy",
-            VITE_API_SEDES: "/sedes",
-            VITE_API_TURNOS: "/turnos",
-            VITE_API_VALIDARDOCUMENTO: "/validar-documento",
-            VITE_API_DISPONIBILIDAD: "/disponibilidad",
+            VITE_API_BASE_URL: "https://api_ciclico.pharmaser.com.co",
+            VITE_API_KEY: "pharmaser_secure_api_key_2026",
         },
     }],
 });
 
-const frontendLb = new oci.loadbalancer.LoadBalancer("zafiro-ui-lb", {
+const frontendLb = new oci.loadbalancer.LoadBalancer("conteo_ui-lb", {
     compartmentId: compartmentId,
-    displayName: "zafiro-ui-lb",
+    displayName: "conteo_ui-lb",
     shape: "flexible",
     subnetIds: [publicSubnetId],
     shapeDetails: {
@@ -159,9 +257,9 @@ const frontendLb = new oci.loadbalancer.LoadBalancer("zafiro-ui-lb", {
     },
 });
 
-const frontendBackendset = new oci.loadbalancer.BackendSet("zafiro-ui-backend-set", {
+const frontendBackendset = new oci.loadbalancer.BackendSet("conteo_ui-backend-set", {
     loadBalancerId: frontendLb.id,
-    name: "zafiro-ui-backend-set",
+    name: "conteo_ui-backend-set",
     policy: "ROUND_ROBIN",
     healthChecker: {
         protocol: "HTTP",
@@ -171,9 +269,9 @@ const frontendBackendset = new oci.loadbalancer.BackendSet("zafiro-ui-backend-se
     }
 });
 
-const frontendListener = new oci.loadbalancer.Listener("zafiro-ui-listener", {
+const frontendListener = new oci.loadbalancer.Listener("conteo_ui-listener", {
     loadBalancerId: frontendLb.id,
-    name: "zafiro-ui-listener",
+    name: "conteo_ui-listener",
     defaultBackendSetName: frontendBackendset.name,
     port: 443,
     protocol: "HTTP",
@@ -183,7 +281,7 @@ const frontendListener = new oci.loadbalancer.Listener("zafiro-ui-listener", {
     }
 });
 
-const frontendBackend = new oci.loadbalancer.Backend("zafiro-ui-backend", {
+const frontendBackend = new oci.loadbalancer.Backend("conteo_ui-backend", {
     loadBalancerId: frontendLb.id,
     backendsetName: frontendBackendset.name,
     ipAddress: frontendContainerInstance.vnics.apply(vnics => vnics[0].privateIp),
@@ -195,6 +293,6 @@ const frontendBackend = new oci.loadbalancer.Backend("zafiro-ui-backend", {
 });
 
 
-
 export const frontendLbPublicIp = frontendLb.ipAddresses;
 export const backendLbPublicIp = backendLb.ipAddresses;
+export const botLbPublicIp = botLb.ipAddresses;

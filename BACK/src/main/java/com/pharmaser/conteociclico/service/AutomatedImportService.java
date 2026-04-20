@@ -40,12 +40,6 @@ public class AutomatedImportService {
     @Value("${app.auto-import.delete-after-process:false}")
     private boolean deleteAfterProcess;
 
-    @Value("${app.bot.python-path:python}")
-    private String pythonPath;
-
-    @Value("${app.bot.script-path}")
-    private String botScriptPath;
-
     @Value("${app.sftp.host}")
     private String sftpHost;
 
@@ -320,7 +314,7 @@ public class AutomatedImportService {
     public void onApplicationReady() {
         if (!enabled)
             return;
-        logger.info(">>> ARRANQUE: Iniciando primera sincronización automática...");
+        logger.info(">>> ARRANQUE: Iniciando primera sincronización automática desde SFTP...");
         scheduledBotSync();
     }
 
@@ -329,12 +323,8 @@ public class AutomatedImportService {
     public void scheduledBotSync() {
         if (!enabled)
             return;
-        logger.info("Iniciando sincronización programada del Bot de Medicar...");
-        executeBot();
-        
-        // Descargar desde SFTP antes de procesar localmente
+        logger.info("Iniciando sincronización programada desde SFTP...");
         downloadFilesFromSftp();
-        
         processFiles();
         logger.info("Sincronización técnica completada.");
     }
@@ -390,32 +380,6 @@ public class AutomatedImportService {
             if (session != null && session.isConnected()) {
                 session.disconnect();
             }
-        }
-    }
-
-    private void executeBot() {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(pythonPath, botScriptPath);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-
-            // Capturar logs del bot para la consola del backend
-            try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    logger.info("[BOT] " + line);
-                }
-            }
-
-            int exitCode = process.waitFor();
-            if (exitCode == 0) {
-                logger.info("Bot de Medicar finalizó exitosamente.");
-            } else {
-                logger.error("El Bot de Medicar falló con código de salida: " + exitCode);
-            }
-        } catch (Exception e) {
-            logger.error("Error crítico ejecutando el Bot de Medicar: " + e.getMessage());
         }
     }
 }
