@@ -1,0 +1,14 @@
+environment:
+  - conteo_ciclico/conteo_ciclico
+config:
+  conteo_ciclico:authToken:
+    secure: AAABAOX6lpxKPbeu7eeDPL83kfnjeCmJwoEKbreHGxWuIMObFYQNbqilOFeURTNQrawv1A==
+  conteo_ciclico:certificateId:
+    secure: AAABAHt5ZlxbQmmE54HWqFsm1WUQQ7bW9Gon8o09NnSkfAdiTFcgw5ooNyYWgoFIoGxq0bv9pPhlZ+CykK9Kr5UQawwPKezTW86DH29HQsF/CWD4ZUS6Lz0ZcDfnQi4Bn3VGzvqoGkgJOYMc0jlE4HMmjKbFNQ==
+  conteo_ciclico:compartmentId: ocid1.compartment.oc1..aaaaaaaacwwp5acpnhqfqh4iafwzydz244k7myiijtrzlwlhaontoyobpdqa
+  conteo_ciclico:namespace: idiliyph1zvh
+  conteo_ciclico:privateSubnetId: ocid1.subnet.oc1.iad.aaaaaaaamefvc6dyjp3nj67tbtp3duoaz5s3ek5ywc3xfiktxiihbtv7f5na
+  conteo_ciclico:publicSubnetId: ocid1.subnet.oc1.iad.aaaaaaaaxw5d55haeoz7jm3w3r5ljiaimvbyw5ehuwrhjizid3gtcvzxvfea
+  conteo_ciclico:region: iad
+  conteo_ciclico:repoBack: conteo_ciclico_back
+  conteo_ciclico:repoFront: conteo_ciclico_front
