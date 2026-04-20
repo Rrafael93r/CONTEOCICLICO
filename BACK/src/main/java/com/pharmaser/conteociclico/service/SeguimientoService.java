@@ -3,32 +3,15 @@ package com.pharmaser.conteociclico.service;
 import com.pharmaser.conteociclico.dto.GlobalSeguimientoMensualDTO;
 import com.pharmaser.conteociclico.dto.SeguimientoMensualDTO;
 import com.pharmaser.conteociclico.dto.SeguimientoSedeDTO;
-import com.pharmaser.conteociclico.model.DetalleConteo;
-import com.pharmaser.conteociclico.model.Personalizado;
-import com.pharmaser.conteociclico.model.Usuario;
-import com.pharmaser.conteociclico.repository.DetalleConteoRepository;
-import com.pharmaser.conteociclico.repository.PersonalizadoRepository;
-import com.pharmaser.conteociclico.repository.UsuarioRepository;
 import com.pharmaser.conteociclico.repository.MedicamentoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDate;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 public class SeguimientoService {
-
-    @Autowired
-    private UsuarioRepository usuarioRepository;
-
-    @Autowired
-    private DetalleConteoRepository detalleConteoRepository;
-
-    @Autowired
-    private PersonalizadoRepository personalizadoRepository;
 
     @Autowired
     private MedicamentoRepository medicamentoRepository;

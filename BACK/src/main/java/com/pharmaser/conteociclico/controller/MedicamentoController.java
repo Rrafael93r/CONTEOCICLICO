@@ -35,6 +35,7 @@ public class MedicamentoController {
         return medicamentoService.getAllMedicamentos();
     }
 
+
     @PostMapping("/bulk")
     public ResponseEntity<String> bulkImport(@RequestBody List<MedicamentoImportDTO> items) {
         medicamentoService.importFromExternalData(items);

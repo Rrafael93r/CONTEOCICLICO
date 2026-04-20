@@ -2,7 +2,6 @@ package com.pharmaser.conteociclico.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
-import java.time.LocalTime;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity

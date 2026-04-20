@@ -24,15 +24,18 @@ public class SedeConfigService {
     }
 
     public SedeConfig saveConfig(SedeConfig config) {
-        return sedeConfigRepository.save(config);
+        if (config == null) return null;
+        return sedeConfigRepository.save(java.util.Objects.requireNonNull(config));
     }
 
     public void deleteConfig(Integer id) {
-        sedeConfigRepository.deleteById(id);
+        if (id == null) return;
+        sedeConfigRepository.deleteById(java.util.Objects.requireNonNull(id));
     }
 
     public SedeConfig updateConfig(Integer id, SedeConfig config) {
-        SedeConfig existing = sedeConfigRepository.findById(id)
+        if (id == null) throw new RuntimeException("Configuración de sede no encontrada");
+        SedeConfig existing = sedeConfigRepository.findById(java.util.Objects.requireNonNull(id))
                 .orElseThrow(() -> new RuntimeException("Configuración de sede no encontrada"));
         
         if (config.getNumeroConteo() != null) existing.setNumeroConteo(config.getNumeroConteo());
@@ -44,7 +47,7 @@ public class SedeConfigService {
         
         // No permitimos cambiar el codigo_sede fácilmente via update parcial
         
-        return sedeConfigRepository.save(existing);
+        return sedeConfigRepository.save(java.util.Objects.requireNonNull(existing));
     }
 
     public SedeConfig getConfigBySede(String codigoSede) {
@@ -76,7 +79,7 @@ public class SedeConfigService {
                 newConfig.setCodigoSede(sedeCode);
                 newConfig.setNumeroConteo(100);
                 newConfig.setTipoConteo("ABC");
-                sedeConfigRepository.save(newConfig);
+                sedeConfigRepository.save(java.util.Objects.requireNonNull(newConfig));
                 created++;
             }
         }

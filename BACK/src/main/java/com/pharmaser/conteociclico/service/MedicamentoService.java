@@ -61,13 +61,14 @@ public class MedicamentoService {
     }
 
     private void executeIndexIfNotExists(String indexName, String alterQuery) {
+        if (alterQuery == null) return;
         try {
             Integer count = jdbcTemplate.queryForObject(
                     "SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='medicamento' AND index_name=?",
                     Integer.class, indexName);
 
             if (count != null && count == 0) {
-                jdbcTemplate.execute(alterQuery);
+                jdbcTemplate.execute(java.util.Objects.requireNonNull(alterQuery));
             }
         } catch (Exception e) {
         }
@@ -246,17 +247,12 @@ public class MedicamentoService {
             }
 
             try {
-                // Clean numeric strings: remove dots (thousands), then replace comma with dot
-                // (decimal)
+
                 String cleanInv = inventarioStr.replaceAll("[^0-9,-]", "").replace(",", ".");
                 if (cleanInv.contains(".")) {
-                    // It was likely something like 1,000.00 or 1.000,00 ... this is tricky.
-                    // Assuming Spanish format from Medicar (1.234,56)
+
                 }
 
-                // Safer approach: Remove characters that common exports use as thousands
-                // separators
-                // mostly dots in Spanish context for quantities
                 int inv = (int) Double
                         .parseDouble(inventarioStr.replace(".", "").replace(",", ".").replaceAll("[^0-9.-]", ""));
                 double cost = Double
@@ -286,16 +282,19 @@ public class MedicamentoService {
     }
 
     public Optional<Medicamento> getMedicamentoById(Integer id) {
-        return medicamentoRepository.findById(id);
+        if (id == null) return Optional.empty();
+        return medicamentoRepository.findById(java.util.Objects.requireNonNull(id));
     }
 
     public Medicamento saveMedicamento(Medicamento medicamento) {
-        return medicamentoRepository.save(medicamento);
+        if (medicamento == null) return null;
+        return medicamentoRepository.save(java.util.Objects.requireNonNull(medicamento));
     }
 
     @org.springframework.transaction.annotation.Transactional
     public void marcarComoContado(Integer idMed, Double cantidadReal) {
-        Medicamento med = medicamentoRepository.findById(idMed)
+        if (idMed == null) return;
+        Medicamento med = medicamentoRepository.findById(java.util.Objects.requireNonNull(idMed))
                 .orElseThrow(() -> new RuntimeException("Medicamento no encontrado"));
 
         // Lógica de incremento de estado
@@ -335,7 +334,8 @@ public class MedicamentoService {
     }
 
     public void deleteMedicamento(Integer id) {
-        medicamentoRepository.deleteById(id);
+        if (id == null) return;
+        medicamentoRepository.deleteById(java.util.Objects.requireNonNull(id));
     }
 
     @org.springframework.transaction.annotation.Transactional
@@ -438,8 +438,8 @@ public class MedicamentoService {
 
             log.setCountA(totalA);
             log.setCountB(totalB);
-            log.setCountC(totalC + jdbcTemplate.queryForObject("SELECT COUNT(1) FROM medicamento WHERE costototal <= 0",
-                    Integer.class));
+            Integer extraC = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM medicamento WHERE costototal <= 0", Integer.class);
+            log.setCountC(totalC + (extraC != null ? extraC : 0));
             log.setRegistrosProcesados(sedes.size()); // Guardamos número de sedes procesadas
             log.setEstado("EXITO");
             log.setMensajeError(sedeLog.toString());
@@ -493,12 +493,12 @@ public class MedicamentoService {
 
     public List<com.pharmaser.conteociclico.dto.MedicamentoSummaryDTO> getSedesSummary() {
         String sql = "SELECT m.idusuario, u.sede, " +
-                     "COUNT(*) as total, " +
-                     "SUM(CASE WHEN m.estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contados, " +
-                     "SUM(CASE WHEN m.estadodelconteo = 'no' THEN 1 ELSE 0 END) as pendientes " +
-                     "FROM medicamento m " +
-                     "JOIN usuario u ON m.idusuario = u.id " +
-                     "GROUP BY m.idusuario, u.sede";
+                "COUNT(*) as total, " +
+                "SUM(CASE WHEN m.estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contados, " +
+                "SUM(CASE WHEN m.estadodelconteo = 'no' THEN 1 ELSE 0 END) as pendientes " +
+                "FROM medicamento m " +
+                "JOIN usuario u ON m.idusuario = u.id " +
+                "GROUP BY m.idusuario, u.sede";
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             com.pharmaser.conteociclico.dto.MedicamentoSummaryDTO dto = new com.pharmaser.conteociclico.dto.MedicamentoSummaryDTO();
@@ -508,16 +508,19 @@ public class MedicamentoService {
             dto.setContados(rs.getLong("contados"));
             dto.setPendientes(rs.getLong("pendientes"));
 
-            // Calcular porcentajes de cobertura por categoría para esta sede de forma rápida
+            // Calcular porcentajes de cobertura por categoría para esta sede de forma
+            // rápida
             // Podríamos hacerlo en el mismo query, pero para legibilidad y flexibilidad:
             return dto;
         });
     }
 
     public List<Medicamento> searchMedicamentos(String term, int limit) {
-        if (term == null || term.trim().isEmpty()) return new ArrayList<>();
+        if (term == null || term.trim().isEmpty())
+            return new ArrayList<>();
         String pattern = "%" + term.toLowerCase() + "%";
-        return jdbcTemplate.query("SELECT * FROM medicamento WHERE LOWER(descripcion) LIKE ? OR LOWER(plu) LIKE ? LIMIT ?",
+        return jdbcTemplate.query(
+                "SELECT * FROM medicamento WHERE LOWER(descripcion) LIKE ? OR LOWER(plu) LIKE ? LIMIT ?",
                 (rs, rowNum) -> {
                     Medicamento m = new Medicamento();
                     m.setId(rs.getInt("id"));
@@ -535,16 +538,18 @@ public class MedicamentoService {
 
     public Map<String, Object> getGlobalStats() {
         String sql = "SELECT " +
-                     "COUNT(*) as total, " +
-                     "SUM(CASE WHEN estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contados, " +
-                     "SUM(CASE WHEN tipomolecula = 'A' THEN 1 ELSE 0 END) as totalA, " +
-                     "SUM(CASE WHEN tipomolecula = 'A' AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosA, " +
-                     "SUM(CASE WHEN tipomolecula = 'B' THEN 1 ELSE 0 END) as totalB, " +
-                     "SUM(CASE WHEN tipomolecula = 'B' AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosB, " +
-                     "SUM(CASE WHEN (tipomolecula = 'C' OR tipomolecula IS NULL) THEN 1 ELSE 0 END) as totalC, " +
-                     "SUM(CASE WHEN (tipomolecula = 'C' OR tipomolecula IS NULL) AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosC " +
-                     "FROM medicamento";
-        
+                "COUNT(*) as total, " +
+                "SUM(CASE WHEN estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contados, " +
+                "SUM(CASE WHEN tipomolecula = 'A' THEN 1 ELSE 0 END) as totalA, " +
+                "SUM(CASE WHEN tipomolecula = 'A' AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosA, " +
+                "SUM(CASE WHEN tipomolecula = 'B' THEN 1 ELSE 0 END) as totalB, " +
+                "SUM(CASE WHEN tipomolecula = 'B' AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosB, " +
+                "SUM(CASE WHEN (tipomolecula = 'C' OR tipomolecula IS NULL) THEN 1 ELSE 0 END) as totalC, " +
+                "SUM(CASE WHEN (tipomolecula = 'C' OR tipomolecula IS NULL) AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosC "
+                +
+                "FROM medicamento";
+
         return jdbcTemplate.queryForMap(sql);
     }
+
 }

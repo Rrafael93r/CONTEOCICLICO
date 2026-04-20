@@ -2,7 +2,6 @@ package com.pharmaser.conteociclico.service;
 
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
-import com.opencsv.exceptions.CsvValidationException;
 import com.pharmaser.conteociclico.dto.MedicamentoImportDTO;
 import com.pharmaser.conteociclico.model.LogCargaAutomatica;
 import org.slf4j.Logger;
@@ -10,10 +9,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.context.event.EventListener;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.lang.NonNull;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
@@ -23,6 +20,8 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.*;
 import org.apache.poi.ss.usermodel.*;
+import com.jcraft.jsch.*;
+import java.io.FileOutputStream;
 
 @Service
 public class AutomatedImportService {
@@ -46,6 +45,21 @@ public class AutomatedImportService {
 
     @Value("${app.bot.script-path}")
     private String botScriptPath;
+
+    @Value("${app.sftp.host}")
+    private String sftpHost;
+
+    @Value("${app.sftp.port:22}")
+    private int sftpPort;
+
+    @Value("${app.sftp.username}")
+    private String sftpUser;
+
+    @Value("${app.sftp.password}")
+    private String sftpPassword;
+
+    @Value("${app.sftp.remote-path}")
+    private String sftpRemotePath;
 
     @Autowired
     private MedicamentoService medicamentoService;
@@ -310,7 +324,6 @@ public class AutomatedImportService {
         scheduledBotSync();
     }
 
-    // Programación Cron: 5:00 AM y 4:30 PM (16:30)
     @Scheduled(cron = "0 0 5 * * *")
     @Scheduled(cron = "0 30 16 * * *")
     public void scheduledBotSync() {
@@ -318,8 +331,66 @@ public class AutomatedImportService {
             return;
         logger.info("Iniciando sincronización programada del Bot de Medicar...");
         executeBot();
+        
+        // Descargar desde SFTP antes de procesar localmente
+        downloadFilesFromSftp();
+        
         processFiles();
         logger.info("Sincronización técnica completada.");
+    }
+
+    private void downloadFilesFromSftp() {
+        logger.info("Conectando a SFTP {}:{}...", sftpHost, sftpPort);
+        Session session = null;
+        ChannelSftp channelSftp = null;
+
+        try {
+            JSch jsch = new JSch();
+            session = jsch.getSession(sftpUser, sftpHost, sftpPort);
+            session.setPassword(sftpPassword);
+
+            // Configuración para evitar errores de StrictHostKeyChecking si el servidor es nuevo
+            java.util.Properties config = new java.util.Properties();
+            config.put("StrictHostKeyChecking", "no");
+            session.setConfig(config);
+
+            session.connect();
+            logger.info("Sesión SFTP establecida.");
+
+            channelSftp = (ChannelSftp) session.openChannel("sftp");
+            channelSftp.connect();
+
+            logger.info("Cambiando a directorio remoto: {}", sftpRemotePath);
+            channelSftp.cd(sftpRemotePath);
+
+            Vector<ChannelSftp.LsEntry> fileList = channelSftp.ls("*");
+            for (ChannelSftp.LsEntry entry : fileList) {
+                if (!entry.getAttrs().isDir()) {
+                    String fileName = entry.getFilename();
+                    if (fileName.toLowerCase().endsWith(".xls") || fileName.toLowerCase().endsWith(".xlsx") || fileName.toLowerCase().endsWith(".csv")) {
+                        File localFile = new File(inputPath, fileName);
+                        logger.info("Descargando {} -> {}", fileName, localFile.getAbsolutePath());
+                        
+                        try (FileOutputStream fos = new FileOutputStream(localFile)) {
+                            channelSftp.get(fileName, fos);
+                        }
+                        
+                        // Opcional: eliminar del SFTP después de descargar para evitar duplicados
+                        // channelSftp.rm(fileName);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            logger.error("Error durante la descarga SFTP: {}", e.getMessage());
+        } finally {
+            if (channelSftp != null && channelSftp.isConnected()) {
+                channelSftp.disconnect();
+            }
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+        }
     }
 
     private void executeBot() {

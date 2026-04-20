@@ -2,6 +2,7 @@ from playwright.sync_api import sync_playwright, TimeoutError
 from dotenv import load_dotenv
 import os
 import sys
+import paramiko
 
 # =========================
 # CONFIGURACIÓN
@@ -15,6 +16,13 @@ USUARIO_ID = os.getenv("USUARIO_ID")
 LOGIN = os.getenv("LOGIN")
 PASSWORD = os.getenv("PASSWORD")
 RUTA_DESCARGA = os.getenv("RUTA_DESCARGA", r"C:\Botmedicar")
+
+# Configuración SFTP
+SFTP_HOST = os.getenv("SFTP_HOST")
+SFTP_USER = os.getenv("SFTP_USER")
+SFTP_PASSWORD = os.getenv("SFTP_PASSWORD")
+SFTP_PORT = int(os.getenv("SFTP_PORT", 22))
+SFTP_REMOTE_PATH = os.getenv("SFTP_REMOTE_PATH", "/medicar/ciclicoinventario")
 
 URL_LOGIN = "https://medicar.sis-colombia.com/pharmaser/mutualser/"
 URL_INVENTARIO = "https://medicar.sis-colombia.com/pharmaser/mutualser/el_admin/inventario/seguimiento/inventario.php"
@@ -89,13 +97,51 @@ def exportar_inventario(page):
         
         # Guardar (sobrescribe automáticamente)
         download.save_as(ruta)
-        
         print(f"EXITO: Inventario actualizado correctamente en: {ruta}")
+        
+        # Subir a SFTP
+        subir_a_sftp(ruta)
+        
         new_page.close()
 
     except Exception as e:
         print(f"Error durante la exportacion: {e}")
         sys.exit(1)
+
+# =========================
+# SUBIR A SFTP
+# =========================
+def subir_a_sftp(ruta_local):
+    if not SFTP_HOST:
+        print("Aviso: SFTP_HOST no configurado, omitiendo subida.")
+        return
+
+    print(f"Iniciando subida por SFTP a {SFTP_HOST}...")
+    transport = None
+    try:
+        transport = paramiko.Transport((SFTP_HOST, SFTP_PORT))
+        transport.connect(username=SFTP_USER, password=SFTP_PASSWORD)
+        
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        
+        # Asegurar que el directorio remoto existe (no es recursivo, asume que la ruta base existe)
+        nombre_archivo = os.path.basename(ruta_local)
+        ruta_remota = os.path.join(SFTP_REMOTE_PATH, nombre_archivo).replace("\\", "/")
+        
+        print(f"Subiendo {nombre_archivo} -> {ruta_remota}")
+        sftp.put(ruta_local, ruta_remota)
+        
+        sftp.close()
+        print("Subida SFTP completada exitosamente.")
+
+        # Opcional: Borrar archivo local tras subirlo
+        # os.remove(ruta_local)
+
+    except Exception as e:
+        print(f"Error en SFTP: {e}")
+    finally:
+        if transport:
+            transport.close()
 
 # =========================
 # MAIN
