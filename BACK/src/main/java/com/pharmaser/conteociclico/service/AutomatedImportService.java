@@ -318,8 +318,7 @@ public class AutomatedImportService {
         scheduledBotSync();
     }
 
-    @Scheduled(cron = "0 0 5 * * *")
-    @Scheduled(cron = "0 30 16 * * *")
+    @Scheduled(fixedDelayString = "${app.auto-import.polling-rate:1800000}") // Default 30 min
     public void scheduledBotSync() {
         if (!enabled)
             return;
@@ -339,47 +338,65 @@ public class AutomatedImportService {
             session = jsch.getSession(sftpUser, sftpHost, sftpPort);
             session.setPassword(sftpPassword);
 
-            // Configuración para evitar errores de StrictHostKeyChecking si el servidor es nuevo
             java.util.Properties config = new java.util.Properties();
             config.put("StrictHostKeyChecking", "no");
             session.setConfig(config);
 
             session.connect();
-            logger.info("Sesión SFTP establecida.");
-
             channelSftp = (ChannelSftp) session.openChannel("sftp");
             channelSftp.connect();
 
-            logger.info("Cambiando a directorio remoto: {}", sftpRemotePath);
             channelSftp.cd(sftpRemotePath);
 
             Vector<ChannelSftp.LsEntry> fileList = channelSftp.ls("*");
+            List<ChannelSftp.LsEntry> remoteFiles = new ArrayList<>();
+
             for (ChannelSftp.LsEntry entry : fileList) {
                 if (!entry.getAttrs().isDir()) {
                     String fileName = entry.getFilename();
-                    if (fileName.toLowerCase().endsWith(".xls") || fileName.toLowerCase().endsWith(".xlsx") || fileName.toLowerCase().endsWith(".csv")) {
-                        File localFile = new File(inputPath, fileName);
-                        logger.info("Descargando {} -> {}", fileName, localFile.getAbsolutePath());
-                        
-                        try (FileOutputStream fos = new FileOutputStream(localFile)) {
-                            channelSftp.get(fileName, fos);
-                        }
-                        
-                        // Opcional: eliminar del SFTP después de descargar para evitar duplicados
-                        // channelSftp.rm(fileName);
+                    if (fileName.toLowerCase().endsWith(".xls") || fileName.toLowerCase().endsWith(".xlsx")
+                            || fileName.toLowerCase().endsWith(".csv")) {
+                        remoteFiles.add(entry);
                     }
                 }
             }
 
+            if (remoteFiles.isEmpty()) {
+                logger.info("No se encontraron archivos nuevos en el SFTP.");
+                return;
+            }
+
+            ChannelSftp.LsEntry mostRecent = remoteFiles.stream()
+                    .max(Comparator.comparingInt(e -> e.getAttrs().getMTime()))
+                    .orElse(null);
+
+            if (mostRecent != null) {
+                String fileName = mostRecent.getFilename();
+                File localFile = new File(inputPath, fileName);
+                logger.info("Archivo más reciente detectado: {} (MTIME: {}). Descargando...", fileName,
+                        mostRecent.getAttrs().getMTime());
+
+                try (FileOutputStream fos = new FileOutputStream(localFile)) {
+                    channelSftp.get(fileName, fos);
+                }
+            }
+
+            logger.info("Limpiando carpeta SFTP (eliminando {} archivos)...", remoteFiles.size());
+            for (ChannelSftp.LsEntry entry : remoteFiles) {
+                try {
+                    channelSftp.rm(entry.getFilename());
+                } catch (Exception e) {
+                    logger.error("No se pudo eliminar {} del SFTP: {}", entry.getFilename(), e.getMessage());
+                }
+            }
+
         } catch (Exception e) {
-            logger.error("Error durante la descarga SFTP: {}", e.getMessage());
+            logger.error("Error durante el proceso SFTP: {}", e.getMessage());
         } finally {
-            if (channelSftp != null && channelSftp.isConnected()) {
+            if (channelSftp != null && channelSftp.isConnected())
                 channelSftp.disconnect();
-            }
-            if (session != null && session.isConnected()) {
+            if (session != null && session.isConnected())
                 session.disconnect();
-            }
         }
     }
 }

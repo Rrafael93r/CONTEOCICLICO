@@ -8,12 +8,9 @@ import datetime
 def log(msg):
     print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
-# =========================
-# CONFIGURACIÓN
-# =========================
-# Intentar cargar .env desde el directorio padre (raíz del proyecto BACK) 
-# si no están las variables ya en el entorno
-env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+
+# Intentar cargar .env desde el directorio local del bot
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(env_path)
 
 USUARIO_ID = os.getenv("USUARIO_ID")
