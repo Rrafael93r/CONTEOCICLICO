@@ -48,7 +48,7 @@ EXPOSE 8080
 
 # Healthcheck para verificar que la app está funcionando
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider https://api_ciclico.pharmaser.com.co/actuator/health 2>/dev/null || exit 1
+    CMD wget --no-verbose --tries=1 --spider https://apiciclico.pharmaser.com.co/actuator/health 2>/dev/null || exit 1
 
 # Variables de entorno para JVM (optimizadas para contenedores)
 ENV JAVA_OPTS="-XX:+UseContainerSupport \
