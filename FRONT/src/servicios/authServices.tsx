@@ -24,7 +24,7 @@ export const login = async (username: string, password: string): Promise<User> =
 
     const userInfo = {
       id: user.id,
-      usuario: user.usuario, 
+      usuario: user.usuario,
       roleId: user.rol.id,
       token: token,
       numeroConteo: user.numeroConteo

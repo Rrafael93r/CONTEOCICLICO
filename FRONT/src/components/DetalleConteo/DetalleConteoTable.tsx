@@ -113,9 +113,8 @@ const DetalleConteoTable: React.FC = () => {
             const allCyclicCompleted = cyclicTasks.length > 0 && cyclicTasks.every(d => d.cantidadContada !== null);
 
             if (isFirstLoadOfToday || allCyclicCompleted) {
-                const currentIdsInTable = hoyUserDetalles.map(d => Number(d.idMedicamento || d.medicamento?.id));
                 const { generateABCBlock } = await import('../../utils/cycleGenerator');
-                const generatedMeds = await generateABCBlock(currentUser, allMedsForLookup, currentIdsInTable, fechaHoy);
+                const generatedMeds = await generateABCBlock(currentUser, fechaHoy);
                 
                 if (generatedMeds.length > 0) {
                     const updatedRaw = await getAllDetalles(currentUser.id, fechaHoy);
