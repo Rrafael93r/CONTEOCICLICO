@@ -257,6 +257,8 @@ const AdminPanel: React.FC = () => {
             'PLU': d.medicamento?.plu || 'N/A',
             'USUARIO': d.usuario?.usuario?.toUpperCase() || 'N/A',
             'SEDE': d.usuario?.sede?.toUpperCase() || 'GLOBAL',
+            'LOTE': d.lote || 'N/A',
+            'VENCIMIENTO': d.fechaVencimiento || 'N/A',
             'CANT. CONTADA': d.cantidadContada === null ? 'SIN CONTAR' : d.cantidadContada,
             'CANT. TEORICA': d.cantidadActual,
             'DIFERENCIA': d.cantidadContada !== null ? (d.cantidadContada - d.cantidadActual) : 'PÉRDIDA TÉCNICA (X)',
@@ -273,6 +275,7 @@ const AdminPanel: React.FC = () => {
         // Ajustar anchos de columna básicos
         const wscols = [
             { wch: 12 }, { wch: 40 }, { wch: 12 }, { wch: 15 }, { wch: 15 },
+            { wch: 15 }, { wch: 15 }, // LOTE y VENCIMIENTO
             { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 }
         ];
         worksheet['!cols'] = wscols;

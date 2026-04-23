@@ -22,6 +22,8 @@ export interface DetalleConteo {
     horaRegistro: string | null;
     tipoConteo: string;
     idPersonalizado?: number;
+    lote?: string;
+    fechaVencimiento?: string | null;
 }
 
 export const getAllDetalles = async (idUsuario?: number, fecha?: string, startDate?: string, endDate?: string): Promise<DetalleConteo[]> => {

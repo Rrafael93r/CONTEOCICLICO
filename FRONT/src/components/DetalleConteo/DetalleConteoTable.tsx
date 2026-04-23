@@ -15,6 +15,8 @@ import {
 
 interface DetalleConteoEditable extends DetalleConteo {
     inputValue: number | '';
+    inputLote: string;
+    inputFechaVencimiento: string;
 }
 
 const Toast = Swal.mixin({
@@ -125,7 +127,9 @@ const DetalleConteoTable: React.FC = () => {
 
             setDetalles(hoyUserDetalles.map(d => ({
                 ...d,
-                inputValue: d.cantidadContada !== null ? d.cantidadContada : ''
+                inputValue: d.cantidadContada !== null ? d.cantidadContada : '',
+                inputLote: d.lote || '',
+                inputFechaVencimiento: d.fechaVencimiento ? normalizeDate(d.fechaVencimiento) : ''
             })));
             Swal.close();
 
@@ -152,6 +156,14 @@ const DetalleConteoTable: React.FC = () => {
         }
         const numValue = Math.max(0, parseInt(newValue) || 0);
         setDetalles(prev => prev.map(d => d.id === id ? { ...d, inputValue: numValue } : d));
+    };
+
+    const handleLoteChange = (id: number, newValue: string) => {
+        setDetalles(prev => prev.map(d => d.id === id ? { ...d, inputLote: newValue } : d));
+    };
+
+    const handleFechaVencimientoChange = (id: number, newValue: string) => {
+        setDetalles(prev => prev.map(d => d.id === id ? { ...d, inputFechaVencimiento: newValue } : d));
     };
 
     const handleSavePartial = async () => {
@@ -192,6 +204,8 @@ const DetalleConteoTable: React.FC = () => {
                 return {
                     ...d,
                     cantidadContada: Number(d.inputValue),
+                    lote: d.inputLote,
+                    fechaVencimiento: d.inputFechaVencimiento || null,
                     horaRegistro: horaActual
                 };
             });
@@ -252,7 +266,9 @@ const DetalleConteoTable: React.FC = () => {
                         <thead>
                             <tr className="bg-gray-50/50">
                                 <th className="px-8 py-6 text-left text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Medicamento / PLU</th>
-                                <th className="px-8 py-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic w-48">Contado</th>
+                                <th className="px-8 py-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic w-32">Lote</th>
+                                <th className="px-8 py-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic w-44">Vencimiento</th>
+                                <th className="px-8 py-6 text-center text-[10px] font-black text-gray-400 uppercase tracking-widest italic w-32">Contado</th>
                                 <th className="px-8 py-6 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Estado</th>
                             </tr>
                         </thead>
@@ -272,6 +288,25 @@ const DetalleConteoTable: React.FC = () => {
                                                 </div>
                                             </div>
                                         </div>
+                                    </td>
+                                    <td className="px-4 py-8">
+                                        <input
+                                            type="text"
+                                            className={`w-full text-center py-4 rounded-xl border-2 border-transparent outline-none font-bold text-xs shadow-inner transition-all placeholder:text-gray-200 ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-gray-600'}`}
+                                            placeholder="LOTE"
+                                            value={d.inputLote}
+                                            onChange={(e) => handleLoteChange(d.id, e.target.value)}
+                                            disabled={loading}
+                                        />
+                                    </td>
+                                    <td className="px-4 py-8">
+                                        <input
+                                            type="date"
+                                            className={`w-full text-center py-4 rounded-xl border-2 border-transparent outline-none font-bold text-xs shadow-inner transition-all placeholder:text-gray-200 ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-gray-600'}`}
+                                            value={d.inputFechaVencimiento}
+                                            onChange={(e) => handleFechaVencimientoChange(d.id, e.target.value)}
+                                            disabled={loading}
+                                        />
                                     </td>
                                     <td className="px-8 py-8">
                                         {d.cantidadContada !== null ? (
@@ -327,6 +362,29 @@ const DetalleConteoTable: React.FC = () => {
                         </div>
 
                         <div className="space-y-4 border-t border-gray-50 pt-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block text-center">Lote</label>
+                                    <input
+                                        type="text"
+                                        className={`w-full py-3 border-2 border-transparent rounded-xl text-center font-bold text-sm outline-none transition-all shadow-inner ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-gray-600'}`}
+                                        placeholder="LOTE"
+                                        value={d.inputLote}
+                                        onChange={(e) => handleLoteChange(d.id, e.target.value)}
+                                        disabled={loading}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block text-center">Vencimiento</label>
+                                    <input
+                                        type="date"
+                                        className={`w-full py-3 border-2 border-transparent rounded-xl text-center font-bold text-xs outline-none transition-all shadow-inner ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-gray-600'}`}
+                                        value={d.inputFechaVencimiento}
+                                        onChange={(e) => handleFechaVencimientoChange(d.id, e.target.value)}
+                                        disabled={loading}
+                                    />
+                                </div>
+                            </div>
                             <div className="pt-2">
                                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block text-center">Cantidad Física Contada</label>
                                 {d.cantidadContada !== null ? (

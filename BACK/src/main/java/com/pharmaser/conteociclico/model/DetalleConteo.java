@@ -46,4 +46,10 @@ public class DetalleConteo {
 
     @Column(name = "idpersonalizado")
     private Integer idPersonalizado;
+
+    @Column(name = "lote")
+    private String lote;
+
+    @Column(name = "fechavencimiento")
+    private LocalDate fechaVencimiento;
 }
