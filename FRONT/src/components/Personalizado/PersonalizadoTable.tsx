@@ -99,7 +99,7 @@ const PersonalizadoTable: React.FC = () => {
                                     </td>
                                     <td className="px-10 py-8 text-center">
                                         <span className="bg-gray-100 text-gray-500 px-4 py-1.5 rounded-xl text-[11px] font-black tracking-wide border border-gray-200/50 uppercase">
-                                            {p.medicamento?.codigoGenerico || 'S/N'}
+                                            {p.medicamento?.plu || 'S/N'}
                                         </span>
                                     </td>
                                     <td className="px-10 py-8">
@@ -142,7 +142,7 @@ const PersonalizadoTable: React.FC = () => {
                                 </h4>
                                 <div className="flex flex-wrap gap-2 items-center">
                                     <span className="text-[10px] font-black text-orange-500 bg-orange-50 px-3 py-1 rounded-lg uppercase tracking-widest border border-orange-100">
-                                        {p.medicamento?.codigoGenerico || 'S/N'}
+                                        {p.medicamento?.plu || 'S/N'}
                                     </span>
                                 </div>
                             </div>
