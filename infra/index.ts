@@ -21,97 +21,6 @@ const ad = oci.identity.getAvailabilityDomainOutput({
     adNumber: 1,
 });
 
-
-// BOT
-const botImage = new docker.Image("bot-image", {
-    build: {
-        context: "../PythonBOT",
-        dockerfile: "../PythonBOT/Dockerfile",
-        platform: "linux/amd64",
-    },
-    imageName: pulumi.interpolate`${region}.ocir.io/${namespace}/${repoPythonBot}:latest`,
-    registry: {
-        server: pulumi.interpolate`${region}.ocir.io`,
-        username: pulumi.interpolate`${namespace}/develop@pharmaser.com.co`,
-        password: authToken,
-    },
-});
-
-const botContainerInstance = new oci.containerengine.ContainerInstance("bot-instance", {
-    compartmentId: compartmentId,
-    displayName: "bot-instance",
-    availabilityDomain: ad.name,
-    shape: "CI.Standard.E4.Flex",
-    shapeConfig: {
-        ocpus: 1,
-        memoryInGbs: 2,
-    },
-    vnics: [{
-        subnetId: privateSubnetId,
-        isPublicIpAssigned: false,
-    }],
-    containers: [{
-        imageUrl: botImage.imageName,
-        displayName: "bot-container",
-        environmentVariables: {
-            USUARIO_ID: "8060118118",
-            LOGIN: "1050946629M",
-            PASSWORD: "Pharmaser*2025",
-            RUTA_DESCARGA: "/app/downloads",
-            SFTP_HOST: "sftp.pharmaser.com.co",
-            SFTP_USER: "cporto",
-            SFTP_PASSWORD: "Ph@rm4s3r.",
-            SFTP_REMOTE_PATH: "/medicar/ciclicoinventario"
-        },
-    }],
-});
-
-const botLb = new oci.loadbalancer.LoadBalancer("bot-lb", {
-    compartmentId: compartmentId,
-    displayName: "bot-lb",
-    shape: "flexible",
-    subnetIds: [publicSubnetId],
-    shapeDetails: {
-        maximumBandwidthInMbps: 100,
-        minimumBandwidthInMbps: 10
-    },
-});
-
-const botBackendset = new oci.loadbalancer.BackendSet("bot-backend-set", {
-    loadBalancerId: botLb.id,
-    name: "bot-backend-set",
-    policy: "ROUND_ROBIN",
-    healthChecker: {
-        protocol: "HTTP",
-        urlPath: "/status",
-        port: 8000,
-        returnCode: 200,
-    }
-});
-
-const botListener = new oci.loadbalancer.Listener("bot-listener", {
-    loadBalancerId: botLb.id,
-    name: "bot-listener",
-    defaultBackendSetName: botBackendset.name,
-    port: 443,
-    protocol: "HTTP",
-    sslConfiguration: {
-        certificateIds: [certificateId],
-        verifyPeerCertificate: false,
-    }
-});
-
-const botBackend = new oci.loadbalancer.Backend("bot-backend", {
-    loadBalancerId: botLb.id,
-    backendsetName: botBackendset.name,
-    ipAddress: botContainerInstance.vnics.apply(vnics => vnics[0].privateIp),
-    port: 8000,
-    backup: false,
-    drain: false,
-    offline: false,
-    weight: 1,
-});
-
 // Backend
 const backendImage = new docker.Image("conteo_api-image", {
     build: {
@@ -240,7 +149,7 @@ const frontendContainerInstance = new oci.containerengine.ContainerInstance("con
         imageUrl: frontendImage.imageName,
         displayName: "conteo_ui-container",
         environmentVariables: {
-            VITE_API_BASE_URL: "https://api_ciclico.pharmaser.com.co",
+            VITE_API_BASE_URL: "https://apiciclico.pharmaser.com.co",
             VITE_API_KEY: "pharmaser_secure_api_key_2026",
         },
     }],
@@ -295,4 +204,3 @@ const frontendBackend = new oci.loadbalancer.Backend("conteo_ui-backend", {
 
 export const frontendLbPublicIp = frontendLb.ipAddresses;
 export const backendLbPublicIp = backendLb.ipAddresses;
-export const botLbPublicIp = botLb.ipAddresses;
