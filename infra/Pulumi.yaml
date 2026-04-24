@@ -1,0 +1,10 @@
+name: conteo_ciclico
+description: Infraestructura para Conteo Ciclico
+runtime:
+  name: nodejs
+  options:
+    packagemanager: pnpm
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: oci-typescript
