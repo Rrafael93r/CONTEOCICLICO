@@ -22,6 +22,16 @@ public class DetalleConteoService {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        try {
+            jdbcTemplate.execute("ALTER TABLE detalleconteo ADD COLUMN IF NOT EXISTS lote VARCHAR(255)");
+            jdbcTemplate.execute("ALTER TABLE detalleconteo ADD COLUMN IF NOT EXISTS fechavencimiento DATE");
+        } catch (Exception e) {
+            // Ignorar si ya existen o si el motor no soporta IF NOT EXISTS
+        }
+    }
+
     public List<DetalleConteo> getDetallesByUsuarioYFecha(Integer idUsuario, LocalDate fecha) {
         return detalleConteoRepository.findByIdUsuarioAndFechaRegistro(idUsuario, fecha);
     }
@@ -51,23 +61,19 @@ public class DetalleConteoService {
     }
 
     public DetalleConteo saveDetalle(@NonNull DetalleConteo detalle) {
-        // Evitar duplicados si es un nuevo registro
-        if (detalle.getId() == null) {
+        // Permitir duplicados si traen lote o si el existente ya tiene lote (lotes múltiples)
+        if (detalle.getId() == null || detalle.getId() == 0) {
             List<DetalleConteo> existentes = detalleConteoRepository
                     .findByIdUsuarioAndFechaRegistro(detalle.getIdUsuario(), detalle.getFechaRegistro());
             for (DetalleConteo e : existentes) {
-                // Si es un conteo cíclico (sin ID personalizado), evitamos duplicar la misma
-                // molécula el mismo día si está pendiente
+                // Si la molécula ya existe hoy, está pendiente, y NO tiene lote, 
+                // entonces sí es un duplicado del registro base.
+                // Pero si el nuevo registro trae lote, lo dejamos pasar como lote extra.
                 if (detalle.getIdPersonalizado() == null && e.getIdPersonalizado() == null &&
                         e.getIdMedicamento().equals(detalle.getIdMedicamento()) &&
-                        e.getCantidadContada() == null) {
-                    return e;
-                }
-                // Si es un conteo personalizado, evitamos duplicar la misma ORDEN de asignación
-                // si ya está en la tabla hoy
-                if (detalle.getIdPersonalizado() != null &&
-                        detalle.getIdPersonalizado().equals(e.getIdPersonalizado()) &&
-                        e.getCantidadContada() == null) {
+                        e.getCantidadContada() == null &&
+                        (detalle.getLote() == null || detalle.getLote().isEmpty()) &&
+                        (e.getLote() == null || e.getLote().isEmpty())) {
                     return e;
                 }
             }
@@ -77,73 +83,35 @@ public class DetalleConteoService {
 
     @org.springframework.transaction.annotation.Transactional
     public List<DetalleConteo> saveAllDetalles(List<DetalleConteo> detalles) {
-        if (detalles.isEmpty())
-            return detalles;
+        if (detalles.isEmpty()) return detalles;
 
-        String insertSql = "INSERT INTO detalleconteo (idmedicamento, idusuario, cantidadcontada, cantidadactual, fecharegistro, horaregistro, tipoconteo, idpersonalizado) "
-                +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-        String updateSql = "UPDATE detalleconteo SET cantidadcontada = ?, horaregistro = ? WHERE id = ?";
+        for (DetalleConteo item : detalles) {
+            try {
+                // Sincronizar con tabla medicamento si hay cantidad contada
+                if (item.getCantidadContada() != null && item.getIdMedicamento() != null) {
+                    medicamentoService.marcarComoContado(item.getIdMedicamento(), item.getCantidadContada().doubleValue());
+                }
 
-        java.util.List<DetalleConteo> toInsert = new java.util.ArrayList<>();
-        java.util.List<DetalleConteo> toUpdate = new java.util.ArrayList<>();
-
-        for (DetalleConteo d : detalles) {
-            if (d.getId() == null) {
-                toInsert.add(d);
-            } else {
-                toUpdate.add(d);
+                if (item.getId() == null || item.getId() == 0) {
+                    // INSERT MANUAL
+                    jdbcTemplate.update(
+                        "INSERT INTO detalleconteo (idmedicamento, idusuario, cantidadcontada, cantidadactual, fecharegistro, horaregistro, tipoconteo, idpersonalizado, lote, fechavencimiento) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        item.getIdMedicamento(), item.getIdUsuario(), item.getCantidadContada(), item.getCantidadActual(), 
+                        item.getFechaRegistro(), item.getHoraRegistro(), item.getTipoConteo(), item.getIdPersonalizado(),
+                        item.getLote(), item.getFechaVencimiento()
+                    );
+                } else {
+                    // UPDATE MANUAL
+                    jdbcTemplate.update(
+                        "UPDATE detalleconteo SET cantidadcontada = ?, horaregistro = ?, lote = ?, fechavencimiento = ? WHERE id = ?",
+                        item.getCantidadContada(), item.getHoraRegistro(), item.getLote(), item.getFechaVencimiento(), item.getId()
+                    );
+                }
+            } catch (Exception e) {
+                // Si falla uno, intentamos con el siguiente pero registramos el error
+                System.err.println("Error guardando detalle: " + e.getMessage());
             }
         }
-
-        if (!toInsert.isEmpty()) {
-            jdbcTemplate.batchUpdate(insertSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
-                @Override
-                public void setValues(@NonNull java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
-                    DetalleConteo item = toInsert.get(i);
-                    ps.setObject(1, item.getIdMedicamento());
-                    ps.setObject(2, item.getIdUsuario());
-                    ps.setObject(3, item.getCantidadContada());
-                    ps.setObject(4, item.getCantidadActual());
-                    ps.setObject(5, item.getFechaRegistro());
-                    ps.setObject(6, item.getHoraRegistro());
-                    ps.setString(7, item.getTipoConteo());
-                    ps.setObject(8, item.getIdPersonalizado());
-                }
-
-                @Override
-                public int getBatchSize() {
-                    return toInsert.size();
-                }
-            });
-        }
-
-        if (!toUpdate.isEmpty()) {
-            jdbcTemplate.batchUpdate(updateSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
-                @Override
-                public void setValues(@NonNull java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
-                    DetalleConteo item = toUpdate.get(i);
-                    ps.setObject(1, item.getCantidadContada());
-                    ps.setObject(2, item.getHoraRegistro());
-                    ps.setObject(3, item.getId());
-                    
-                    // Sincronizar con tabla medicamento si hay cantidad contada
-                    if (item.getCantidadContada() != null && item.getIdMedicamento() != null) {
-                        try {
-                            medicamentoService.marcarComoContado(item.getIdMedicamento(), item.getCantidadContada().doubleValue());
-                        } catch (Exception e) {
-                            // Log error but continue batch
-                        }
-                    }
-                }
-
-                @Override
-                public int getBatchSize() {
-                    return toUpdate.size();
-                }
-            });
-        }
-
         return detalles;
     }
 

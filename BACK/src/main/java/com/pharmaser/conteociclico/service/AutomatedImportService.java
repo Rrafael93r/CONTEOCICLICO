@@ -22,6 +22,7 @@ import java.util.*;
 import org.apache.poi.ss.usermodel.*;
 import com.jcraft.jsch.*;
 import java.io.FileOutputStream;
+import java.nio.file.StandardCopyOption;
 
 @Service
 public class AutomatedImportService {
@@ -98,31 +99,34 @@ public class AutomatedImportService {
             File folder = new File(inputPath);
             if (!folder.exists()) {
                 folder.mkdirs();
-                return;
             }
 
             File[] files = folder.listFiles((dir, name) -> name.toLowerCase().endsWith(".csv")
                     || name.toLowerCase().endsWith(".xlsx") || name.toLowerCase().endsWith(".xls"));
+            
             if (files == null || files.length == 0)
                 return;
+
+            // Ordenar por fecha para procesar los más viejos primero
+            Arrays.sort(files, Comparator.comparingLong(File::lastModified));
 
             Map<String, Integer> userSedeMap = medicamentoService.buildUserSedeMap();
 
             for (File file : files) {
                 String hash = calculateFileHash(file);
-                if (hash == null)
-                    continue;
+                if (hash == null) continue;
 
                 if (idempotenciaRepository.existsById(hash)) {
+                    logger.info("Archivo {} ya procesado anteriormente (Hash duplicado). Moviedo a procesados.", file.getName());
                     try {
-                        moveFile(file);
+                        moveFile(file, true);
                     } catch (IOException e) {
-                        logger.error("Error moviendo archivo duplicado: {}", e.getMessage());
+                        logger.error("Error moviendo archivo duplicado {}: {}", file.getName(), e.getMessage());
                     }
                     continue;
                 }
 
-                processSingleFile(file, userSedeMap, hash, false); // false para no reclasificar individualmente
+                processSingleFile(file, userSedeMap, hash, false);
             }
 
             // Una única reclasificación al final de todo el lote
@@ -132,6 +136,8 @@ public class AutomatedImportService {
                 logger.error("Error en reclasificación final del lote: {}", e.getMessage());
             }
 
+        } catch (Exception e) {
+            logger.error("Error crítico en proceso de archivos: {}", e.getMessage());
         } finally {
             isProcessing.set(false);
         }
@@ -220,20 +226,16 @@ public class AutomatedImportService {
                 }
 
                 logEntry.setEstado("EXITOSO");
+                moveFile(file, true);
 
             } else {
                 logEntry.setEstado("ERROR");
                 logEntry.setDetalle("No se encontraron registros válidos o el archivo está corrupto/vacío.\n"
                         + logDetails.toString());
+                moveFile(file, false);
             }
 
             logEntry.setFechaFin(LocalDateTime.now());
-            try {
-                moveFile(file);
-            } catch (IOException e) {
-                logDetails.append("\nError moviendo archivo: ").append(e.getMessage());
-                logger.error("Error moviendo archivo {} tras proceso: {}", file.getName(), e.getMessage());
-            }
 
         } catch (Exception e) {
             logger.error("Error procesando archivo automático {}: ", file.getName(), e);
@@ -243,6 +245,11 @@ public class AutomatedImportService {
             if (finalLog.length() > 60000)
                 finalLog = finalLog.substring(0, 60000) + "... [Truncado]";
             logEntry.setDetalle(finalLog);
+            try {
+                moveFile(file, false);
+            } catch (IOException ex) {
+                logger.error("Error moviendo archivo fallido: {}", ex.getMessage());
+            }
         } finally {
             logRepository.save(logEntry);
         }
@@ -292,21 +299,31 @@ public class AutomatedImportService {
         return data;
     }
 
-    private void moveFile(File file) throws IOException {
-        if (deleteAfterProcess) {
+    private void moveFile(File file, boolean success) throws IOException {
+        if (deleteAfterProcess && success) {
             Files.deleteIfExists(file.toPath());
             logger.info("Archivo {} eliminado tras procesamiento exitoso.", file.getName());
             return;
         }
 
-        Path targetDir = Paths.get(processedPath);
+        String subFolder = success ? "" : "/fallidos";
+        Path targetDir = Paths.get(processedPath + subFolder);
+        
         if (!Files.exists(targetDir)) {
             Files.createDirectories(targetDir);
         }
 
         String timestamp = String.valueOf(System.currentTimeMillis());
         Path targetPath = targetDir.resolve(timestamp + "_" + file.getName());
-        Files.move(file.toPath(), targetPath);
+        
+        try {
+            Files.move(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            logger.error("No se pudo mover el archivo {} a {}: {}", file.getName(), targetPath, e.getMessage());
+            // Si falla el movimiento, intentamos copiar y borrar (algunas veces falla en Windows si hay bloqueos)
+            Files.copy(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            Files.deleteIfExists(file.toPath());
+        }
     }
 
     // Ejecutar inmediatamente al arrancar el proyecto
@@ -366,27 +383,24 @@ public class AutomatedImportService {
                 return;
             }
 
-            ChannelSftp.LsEntry mostRecent = remoteFiles.stream()
-                    .max(Comparator.comparingInt(e -> e.getAttrs().getMTime()))
-                    .orElse(null);
+            logger.info("Se detectaron {} archivos en SFTP. Iniciando descarga...", remoteFiles.size());
 
-            if (mostRecent != null) {
-                String fileName = mostRecent.getFilename();
+            for (ChannelSftp.LsEntry entry : remoteFiles) {
+                String fileName = entry.getFilename();
                 File localFile = new File(inputPath, fileName);
-                logger.info("Archivo más reciente detectado: {} (MTIME: {}). Descargando...", fileName,
-                        mostRecent.getAttrs().getMTime());
-
+                
                 try (FileOutputStream fos = new FileOutputStream(localFile)) {
                     channelSftp.get(fileName, fos);
-                }
-            }
-
-            logger.info("Limpiando carpeta SFTP (eliminando {} archivos)...", remoteFiles.size());
-            for (ChannelSftp.LsEntry entry : remoteFiles) {
-                try {
-                    channelSftp.rm(entry.getFilename());
-                } catch (Exception e) {
-                    logger.error("No se pudo eliminar {} del SFTP: {}", entry.getFilename(), e.getMessage());
+                    logger.info("Archivo {} descargado exitosamente.", fileName);
+                    
+                    // Solo eliminamos del SFTP si la descarga local fue exitosa
+                    try {
+                        channelSftp.rm(fileName);
+                    } catch (Exception e) {
+                        logger.error("No se pudo eliminar {} del SFTP tras descarga: {}", fileName, e.getMessage());
+                    }
+                } catch (Exception downloadEx) {
+                    logger.error("Error descargando archivo {} desde SFTP: {}", fileName, downloadEx.getMessage());
                 }
             }
 

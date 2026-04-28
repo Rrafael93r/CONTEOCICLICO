@@ -51,5 +51,6 @@ public class DetalleConteo {
     private String lote;
 
     @Column(name = "fechavencimiento")
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate fechaVencimiento;
 }
