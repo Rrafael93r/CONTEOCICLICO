@@ -19,23 +19,31 @@ public class DetalleConteoController {
 
     @GetMapping
     public List<DetalleConteo> getAll(@RequestParam(required = false) Integer idUsuario, 
+                                     @RequestParam(required = false) String sede,
                                      @RequestParam(required = false) String fecha,
                                      @RequestParam(required = false) String startDate,
                                      @RequestParam(required = false) String endDate) {
         
         LocalDate reqDate = (fecha != null && !fecha.isEmpty()) ? LocalDate.parse(fecha) : LocalDate.now();
 
-        // Logica de rangos para reportes (solo si se envian ambos explicitamente)
+        // Logica de rangos para reportes
         if (startDate != null && !startDate.isEmpty() && endDate != null && !endDate.isEmpty()) {
             LocalDate start = LocalDate.parse(startDate);
             LocalDate end = LocalDate.parse(endDate);
+            
+            if (sede != null && !sede.isEmpty()) {
+                return detalleConteoService.getDetallesBySedeYRango(sede, start, end);
+            }
             if (idUsuario != null) {
                 return detalleConteoService.getDetallesByUsuarioYRango(idUsuario, start, end);
             }
             return detalleConteoService.getDetallesByRango(start, end);
         }
 
-        // Caso por defecto: Una sola fecha (Por defecto Hoy)
+        // Caso por defecto
+        if (sede != null && !sede.isEmpty()) {
+            return detalleConteoService.getDetallesBySedeYFecha(sede, reqDate);
+        }
         if (idUsuario != null) {
             return detalleConteoService.getDetallesByUsuarioYFecha(idUsuario, reqDate);
         }

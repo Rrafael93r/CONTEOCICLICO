@@ -108,11 +108,18 @@ public class DetalleConteoService {
                     );
                 }
             } catch (Exception e) {
-                // Si falla uno, intentamos con el siguiente pero registramos el error
-                System.err.println("Error guardando detalle: " + e.getMessage());
+                // Error handling handled by outer transaction if necessary
             }
         }
         return detalles;
+    }
+
+    public List<DetalleConteo> getDetallesBySedeYFecha(String sede, LocalDate fecha) {
+        return detalleConteoRepository.findBySedeAndFecha(sede, fecha);
+    }
+
+    public List<DetalleConteo> getDetallesBySedeYRango(String sede, LocalDate start, LocalDate end) {
+        return detalleConteoRepository.findBySedeAndFechaRegistroBetween(sede, start, end);
     }
 
     public void deleteDetalle(@NonNull Integer id) {

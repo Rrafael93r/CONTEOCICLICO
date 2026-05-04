@@ -60,4 +60,8 @@ public class Medicamento {
 
     @Column(name = "fecha_ultimo_conteo")
     private java.time.LocalDateTime fechaUltimoConteo;
+
+    @Column(name = "codigogenerico")
+    private String codigogenerico;
+
 }

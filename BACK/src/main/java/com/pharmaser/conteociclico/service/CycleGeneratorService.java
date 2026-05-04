@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.pharmaser.conteociclico.model.SedeConfig;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -35,6 +37,9 @@ public class CycleGeneratorService {
     @Autowired
     private SedeConfigService sedeConfigService;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private String getConfigValue(String clave, String sede, String defaultValue) {
         if (clave == null) {
             return defaultValue;
@@ -51,11 +56,6 @@ public class CycleGeneratorService {
                 .map(SistemaConfiguracion::getValor)
                 .filter(v -> v != null && !v.trim().isEmpty())
                 .orElse(defaultValue);
-    }
-
-    private boolean isFeatureEnabled(String clave, String sede, boolean defaultValue) {
-        String val = getConfigValue(clave, sede, String.valueOf(defaultValue));
-        return "true".equalsIgnoreCase(val) || "1".equals(val);
     }
 
     @Transactional
@@ -111,7 +111,7 @@ public class CycleGeneratorService {
         // 4. GENERACIÓN DE SELECCIÓN PARA LA SEDE
         List<Medicamento> totalSedeSelection = generateSedeSelection(sede, cuotaPorSede);
 
-        // 5. REPARTO EQUITATIVO (Round Robin)
+        // 5. REPARTO EQUITATIVO POR FAMILIAS (Round Robin)
         if (!totalSedeSelection.isEmpty()) {
             // Consumir permiso si es extra
             if ("Cíclico Adicional".equals(tipoAAsignar)) {
@@ -121,27 +121,35 @@ public class CycleGeneratorService {
 
             // Obtener todos los usuarios de la sede (que no sean admin)
             List<Usuario> operarios = usuarioRepository.findBySedeAndIdRol(sede, 1);
-
             if (operarios.isEmpty()) {
-                operarios = Collections.singletonList(usuario); // Fallback al usuario actual
+                operarios = Collections.singletonList(usuario);
             }
 
+            // Agrupar por familia para asegurar que todos los integrantes de un código genérico vayan al mismo usuario
+            Map<String, List<Medicamento>> familiesMap = totalSedeSelection.stream()
+                    .collect(Collectors.groupingBy(m -> m.getCodigogenerico() != null ? m.getCodigogenerico() : "SIN_FAMILIA"));
+
+            List<String> familyKeys = new ArrayList<>(familiesMap.keySet());
             List<DetalleConteo> nuevosDetalles = new ArrayList<>();
-            for (int i = 0; i < totalSedeSelection.size(); i++) {
-                Medicamento sel = totalSedeSelection.get(i);
+
+            for (int i = 0; i < familyKeys.size(); i++) {
+                String key = familyKeys.get(i);
+                List<Medicamento> familyMeds = familiesMap.get(key);
                 Usuario targetUser = operarios.get(i % operarios.size());
 
-                DetalleConteo det = new DetalleConteo();
-                det.setIdMedicamento(sel.getId());
-                det.setIdUsuario(targetUser.getId());
-                det.setCantidadActual(sel.getInventario() != null ? sel.getInventario() : 0);
-                det.setFechaRegistro(fechaHoy);
-                det.setHoraRegistro(java.time.LocalTime.now());
-                det.setTipoConteo(tipoAAsignar);
-                nuevosDetalles.add(det);
+                for (Medicamento sel : familyMeds) {
+                    DetalleConteo det = new DetalleConteo();
+                    det.setIdMedicamento(sel.getId());
+                    det.setIdUsuario(targetUser.getId());
+                    det.setCantidadActual(sel.getInventario() != null ? sel.getInventario() : 0);
+                    det.setFechaRegistro(fechaHoy);
+                    det.setHoraRegistro(java.time.LocalTime.now());
+                    det.setTipoConteo(tipoAAsignar);
+                    nuevosDetalles.add(det);
 
-                sel.setEstadoDelConteo("SÍ");
-                medicamentoRepository.save(sel);
+                    sel.setEstadoDelConteo("SÍ");
+                    medicamentoRepository.save(sel);
+                }
             }
             detalleConteoRepository.saveAll(nuevosDetalles);
 
@@ -155,55 +163,84 @@ public class CycleGeneratorService {
         return Collections.emptyList();
     }
 
-    private List<Medicamento> generateSedeSelection(String sede, int totalCuota) {
-        long totalA = medicamentoRepository.countByUsuarioSedeAndTipomolecula(sede, "A");
-        long contadasA1 = medicamentoRepository.countByUsuarioSedeAndTipomoleculaAndEstadoConteoMensualGreaterThan(sede,
-                "A", 0);
-        long totalB = medicamentoRepository.countByUsuarioSedeAndTipomolecula(sede, "B");
-        long contadasB = medicamentoRepository.countByUsuarioSedeAndTipomoleculaAndEstadoConteoMensualGreaterThan(sede,
-                "B", 0);
-        long totalC = medicamentoRepository.countByUsuarioSedeAndTipomolecula(sede, "C");
-        long contadasC = medicamentoRepository.countByUsuarioSedeAndTipomoleculaAndEstadoConteoMensualGreaterThan(sede,
-                "C", 0);
+    private List<Medicamento> generateSedeSelection(String sede, int totalCuotaFamilias) {
+        // Métricas basadas en FAMILIAS (codigogenerico)
+        long totalFamA = countFamiliesBySedeAndTipo(sede, "A");
+        long contadasFamA = countFamiliesBySedeAndTipoAndEstado(sede, "A", 1); // 1 o más conteos
+        
+        long totalFamB = countFamiliesBySedeAndTipo(sede, "B");
+        long contadasFamB = countFamiliesBySedeAndTipoAndEstado(sede, "B", 1);
+        
+        long totalFamC = countFamiliesBySedeAndTipo(sede, "C");
+        long contadasFamC = countFamiliesBySedeAndTipoAndEstado(sede, "C", 1);
 
-        double pctB = totalB > 0 ? (double) contadasB / totalB : 1.0;
-        double pctC = totalC > 0 ? (double) contadasC / totalC : 1.0;
+        double pctB = totalFamB > 0 ? (double) contadasFamB / totalFamB : 1.0;
+        double pctC = totalFamC > 0 ? (double) contadasFamC / totalFamC : 1.0;
 
         List<Medicamento> selection = new ArrayList<>();
 
-        if (contadasA1 < totalA) {
-            selection = limitBloque(
-                    medicamentoRepository.findByUsuarioSedeAndEstadoConteoMensualAndTipomolecula(sede, 0, "A"),
-                    totalCuota);
+        if (contadasFamA < totalFamA) {
+            // Fase 1: Priorizar Familias A no contadas
+            selection = limitBloquePorFamilias(sede, "A", 0, totalCuotaFamilias);
         } else if (pctB < 0.60) {
-            int cuotaA = (int) Math.ceil(totalCuota * 0.20);
-            int cuotaB = totalCuota - cuotaA;
-            selection.addAll(limitBloque(
-                    medicamentoRepository.findByUsuarioSedeAndEstadoConteoMensualAndTipomolecula(sede, 1, "A"),
-                    cuotaA));
-            selection.addAll(limitBloque(
-                    medicamentoRepository.findByUsuarioSedeAndEstadoConteoMensualAndTipomolecula(sede, 0, "B"),
-                    cuotaB));
+            // Fase 2: Cobertura B
+            int cuotaA = (int) Math.ceil(totalCuotaFamilias * 0.20);
+            int cuotaB = totalCuotaFamilias - cuotaA;
+            selection.addAll(limitBloquePorFamilias(sede, "A", 1, cuotaA));
+            selection.addAll(limitBloquePorFamilias(sede, "B", 0, cuotaB));
         } else if (pctC < 0.40) {
-            int cuotaA = (int) Math.ceil(totalCuota * 0.15);
-            int cuotaC = totalCuota - cuotaA;
-            selection.addAll(limitBloque(
-                    medicamentoRepository.findByUsuarioSedeAndEstadoConteoMensualAndTipomolecula(sede, 1, "A"),
-                    cuotaA));
-            selection.addAll(limitBloque(
-                    medicamentoRepository.findByUsuarioSedeAndEstadoConteoMensualAndTipomolecula(sede, 0, "C"),
-                    cuotaC));
+            // Fase 3: Cobertura C
+            int cuotaA = (int) Math.ceil(totalCuotaFamilias * 0.15);
+            int cuotaC = totalCuotaFamilias - cuotaA;
+            selection.addAll(limitBloquePorFamilias(sede, "A", 1, cuotaA));
+            selection.addAll(limitBloquePorFamilias(sede, "C", 0, cuotaC));
         } else {
-            List<Medicamento> tempBloque = new ArrayList<>();
-            tempBloque
-                    .addAll(medicamentoRepository.findByUsuarioSedeAndEstadoConteoMensualAndTipomolecula(sede, 0, "B"));
-            if (tempBloque.size() < totalCuota) {
-                tempBloque.addAll(
-                        medicamentoRepository.findByUsuarioSedeAndEstadoConteoMensualAndTipomolecula(sede, 0, "C"));
+            // Fase Final: Mezcla
+            selection = limitBloquePorFamilias(sede, "B", 0, totalCuotaFamilias / 2);
+            if (selection.size() < totalCuotaFamilias) {
+                selection.addAll(limitBloquePorFamilias(sede, "C", 0, totalCuotaFamilias - selection.size()));
             }
-            selection = limitBloque(tempBloque, totalCuota);
         }
         return selection;
+    }
+
+    private long countFamiliesBySedeAndTipo(String sede, String tipo) {
+        String sql = "SELECT COUNT(DISTINCT m.codigogenerico) FROM medicamento m " +
+                     "JOIN usuario u ON m.idusuario = u.id WHERE u.sede = ? AND m.tipomolecula = ?";
+        Long count = jdbcTemplate.queryForObject(sql, Long.class, sede, tipo);
+        return count != null ? count : 0;
+    }
+
+    private long countFamiliesBySedeAndTipoAndEstado(String sede, String tipo, int minEstado) {
+        String sql = "SELECT COUNT(DISTINCT m.codigogenerico) FROM medicamento m " +
+                     "JOIN usuario u ON m.idusuario = u.id WHERE u.sede = ? AND m.tipomolecula = ? AND m.estado_conteo_mensual >= ?";
+        Long count = jdbcTemplate.queryForObject(sql, Long.class, sede, tipo, minEstado);
+        return count != null ? count : 0;
+    }
+
+    private List<Medicamento> limitBloquePorFamilias(String sede, String tipo, int estado, int limitFamilias) {
+        if (limitFamilias <= 0) return new ArrayList<>();
+
+        // 1. Obtener los códigos genéricos que cumplen la condición, ordenados por valor total de familia
+        String sqlFamilias = "SELECT m.codigogenerico FROM medicamento m " +
+                            "JOIN usuario u ON m.idusuario = u.id " +
+                            "WHERE u.sede = ? AND m.tipomolecula = ? AND m.estado_conteo_mensual = ? " +
+                            "GROUP BY m.codigogenerico " +
+                            "ORDER BY SUM(m.costototal) DESC LIMIT ?";
+        
+        List<String> codigosGen = jdbcTemplate.queryForList(sqlFamilias, String.class, sede, tipo, estado, limitFamilias);
+        
+        if (codigosGen.isEmpty()) return new ArrayList<>();
+
+        // 2. Traer todos los medicamentos que pertenecen a esas familias en esa sede
+        // Usamos JPA para mantener la coherencia de objetos
+        List<Usuario> usuariosSede = usuarioRepository.findBySede(sede);
+        List<Integer> userIds = usuariosSede.stream().map(Usuario::getId).collect(Collectors.toList());
+
+        return medicamentoRepository.findAll().stream()
+                .filter(m -> userIds.contains(m.getIdUsuario()))
+                .filter(m -> codigosGen.contains(m.getCodigogenerico()))
+                .collect(Collectors.toList());
     }
 
     public boolean isDailyBlockFinished(Integer idUsuario) {
@@ -221,14 +258,7 @@ public class CycleGeneratorService {
                 .allMatch(d -> d.getCantidadContada() != null);
     }
 
-    private List<Medicamento> limitBloque(List<Medicamento> meds, int limit) {
-        // Priorizar por contadoMesAnterior = FALSE y mayor costo
-        return meds.stream()
-                .sorted(Comparator.comparing(Medicamento::getContadoMesAnterior)
-                        .thenComparing(Comparator.comparing(Medicamento::getCosto).reversed()))
-                .limit(limit)
-                .collect(Collectors.toList());
-    }
+
 
     @Transactional
     public List<Medicamento> generarBloqueCiclico(Integer idUsuario, LocalDate fechaHoy, Boolean manual,
@@ -243,7 +273,6 @@ public class CycleGeneratorService {
         String sede = usuario.getSede();
         SedeConfig config = sedeConfigService.getConfigBySede(sede);
 
-        String modo = "ABC";
         int totalQuota = config.getNumeroConteo() != null ? config.getNumeroConteo() : 10;
         if (totalQuota <= 0)
             return Collections.emptyList();
@@ -270,75 +299,12 @@ public class CycleGeneratorService {
 
         // Obtener todos los usuarios de la sede (que no sean admin)
         List<Usuario> operariosSede = usuarioRepository.findBySede(sede);
-        List<Integer> userIdsSede = operariosSede.stream().map(Usuario::getId).collect(Collectors.toList());
 
-        // Obtener todos los medicamentos de la sede (basado en idUsuario de
-        // medicamentos)
-        List<Medicamento> baseMedsForSede = medicamentoRepository.findAll().stream()
-                .filter(m -> m.getIdUsuario() != null && userIdsSede.contains(m.getIdUsuario()))
-                .collect(Collectors.toList());
-
-        Set<Integer> currentIdsInTable = detallesSedeHoy.stream()
-                .map(d -> d.getIdMedicamento())
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-
-        List<Medicamento> totalSelection = new ArrayList<>();
-
-        if ("ABC".equalsIgnoreCase(modo)) {
-            boolean faseCoberturaActiva = isFeatureEnabled("fase_cobertura_activa", sede, true);
-
-            if (faseCoberturaActiva) {
-                // Prioridad 1: Moléculas A no contadas hoy ni previamente en el mes
-                List<Medicamento> medsA = baseMedsForSede.stream()
-                        .filter(m -> "A".equalsIgnoreCase(m.getTipomolecula()))
-                        .filter(m -> "no".equalsIgnoreCase(m.getEstadoDelConteo())
-                                && !currentIdsInTable.contains(m.getId()))
-                        .sorted(Comparator
-                                .comparing((Medicamento m) -> m.getCostoTotal() == null ? 0.0 : m.getCostoTotal())
-                                .reversed())
-                        .collect(Collectors.toList());
-
-                if (!medsA.isEmpty()) {
-                    totalSelection = medsA.stream().limit(totalQuota).collect(Collectors.toList());
-                } else {
-                    // Prioridad 2: Moléculas B/C pendientes por costo total
-                    List<Medicamento> medsBC = baseMedsForSede.stream()
-                            .filter(m -> !"A".equalsIgnoreCase(m.getTipomolecula()))
-                            .filter(m -> "no".equalsIgnoreCase(m.getEstadoDelConteo())
-                                    && !currentIdsInTable.contains(m.getId()))
-                            .sorted(Comparator
-                                    .comparing((Medicamento m) -> m.getCostoTotal() == null ? 0.0 : m.getCostoTotal())
-                                    .reversed())
-                            .collect(Collectors.toList());
-
-                    if (!medsBC.isEmpty()) {
-                        totalSelection = medsBC.stream().limit(totalQuota).collect(Collectors.toList());
-                    }
-                }
-            } else {
-                totalSelection = baseMedsForSede.stream()
-                        .filter(m -> "no".equalsIgnoreCase(m.getEstadoDelConteo())
-                                && !currentIdsInTable.contains(m.getId()))
-                        .sorted(Comparator
-                                .comparing((Medicamento m) -> m.getCostoTotal() == null ? 0.0 : m.getCostoTotal())
-                                .reversed())
-                        .limit(totalQuota)
-                        .collect(Collectors.toList());
-            }
-        } else {
-            // Modo TRADICIONAL
-            totalSelection = baseMedsForSede.stream()
-                    .filter(m -> "no".equalsIgnoreCase(m.getEstadoDelConteo())
-                            && !currentIdsInTable.contains(m.getId()))
-                    .sorted(Comparator.comparing((Medicamento m) -> m.getCostoTotal() == null ? 0.0 : m.getCostoTotal())
-                            .reversed())
-                    .limit(totalQuota)
-                    .collect(Collectors.toList());
-        }
+        // GENERACIÓN DE SELECCIÓN PARA LA SEDE (YA BASADA EN FAMILIAS)
+        List<Medicamento> totalSelection = generateSedeSelection(sede, totalQuota);
 
         if (!totalSelection.isEmpty()) {
-            // Reparto Round Robin
+            // Reparto Round Robin por FAMILIAS
             List<Usuario> operarios = operariosSede.stream()
                     .filter(u -> u.getIdRol() != null && u.getIdRol() == 1)
                     .collect(Collectors.toList());
@@ -346,21 +312,30 @@ public class CycleGeneratorService {
             if (operarios.isEmpty())
                 operarios = Collections.singletonList(usuario);
 
+            // Agrupar por familia para asegurar que todos los integrantes de un código genérico vayan al mismo usuario
+            Map<String, List<Medicamento>> familiesMap = totalSelection.stream()
+                    .collect(Collectors.groupingBy(m -> m.getCodigogenerico() != null ? m.getCodigogenerico() : "SIN_FAMILIA"));
+
+            List<String> familyKeys = new ArrayList<>(familiesMap.keySet());
             List<DetalleConteo> nuevosDetalles = new ArrayList<>();
-            for (int i = 0; i < totalSelection.size(); i++) {
-                Medicamento sel = totalSelection.get(i);
+
+            for (int i = 0; i < familyKeys.size(); i++) {
+                String key = familyKeys.get(i);
+                List<Medicamento> familyMeds = familiesMap.get(key);
                 Usuario targetUser = operarios.get(i % operarios.size());
 
-                DetalleConteo det = new DetalleConteo();
-                det.setIdMedicamento(sel.getId());
-                det.setIdUsuario(targetUser.getId());
-                det.setCantidadActual(sel.getInventario() != null ? sel.getInventario() : 0);
-                det.setFechaRegistro(fechaHoy);
-                det.setTipoConteo(Boolean.TRUE.equals(manual) ? "Cíclico Adicional" : "Cíclico");
-                nuevosDetalles.add(det);
+                for (Medicamento sel : familyMeds) {
+                    DetalleConteo det = new DetalleConteo();
+                    det.setIdMedicamento(sel.getId());
+                    det.setIdUsuario(targetUser.getId());
+                    det.setCantidadActual(sel.getInventario() != null ? sel.getInventario() : 0);
+                    det.setFechaRegistro(fechaHoy);
+                    det.setTipoConteo(Boolean.TRUE.equals(manual) ? "Cíclico Adicional" : "Cíclico");
+                    nuevosDetalles.add(det);
 
-                sel.setEstadoDelConteo("sí");
-                medicamentoRepository.save(sel);
+                    sel.setEstadoDelConteo("sí");
+                    medicamentoRepository.save(sel);
+                }
             }
             detalleConteoRepository.saveAll(nuevosDetalles);
 

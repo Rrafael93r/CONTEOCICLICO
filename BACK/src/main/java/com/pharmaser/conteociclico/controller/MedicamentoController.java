@@ -157,7 +157,12 @@ public class MedicamentoController {
     }
 
     @GetMapping("/search")
-    public List<Medicamento> search(@RequestParam String q, @RequestParam(defaultValue = "50") int limit) {
+    public List<Medicamento> search(@RequestParam String q, 
+                                   @RequestParam(required = false) String sede,
+                                   @RequestParam(defaultValue = "50") int limit) {
+        if (sede != null && !sede.isEmpty()) {
+            return medicamentoService.searchMedicamentosBySede(q, sede, limit);
+        }
         return medicamentoService.searchMedicamentos(q, limit);
     }
 }

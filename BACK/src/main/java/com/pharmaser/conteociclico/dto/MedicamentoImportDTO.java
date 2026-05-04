@@ -13,4 +13,5 @@ public class MedicamentoImportDTO {
     private String tipomolecula;
     private Integer reglaAplicadaId;
     private java.time.LocalDateTime fechaClasificacion;
+    private String codigogenerico;
 }

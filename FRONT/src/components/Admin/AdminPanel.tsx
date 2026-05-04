@@ -8,6 +8,7 @@ import { getAllSedeConfigs, updateSedeConfig, syncSedes, SedeConfig } from '../.
 import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import axios from '../../servicios/axiosConfig';
+import { importMaestra } from '../../servicios/maestraMedicamentoService';
 import {
     IconUsers,
     IconMedicineSyrup,
@@ -32,6 +33,10 @@ import {
 const AdminPanel: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'usuarios' | 'asignar' | 'reportes' | 'importar' | 'seguimiento'>('usuarios');
     const [searchTermSeguimiento, setSearchTermSeguimiento] = useState('');
+    const [assignSearchTerm, setAssignSearchTerm] = useState('');
+    const [reportSearchTerm, setReportSearchTerm] = useState('');
+    const [isAssignDropdownOpen, setIsAssignDropdownOpen] = useState(false);
+    const [isReportDropdownOpen, setIsReportDropdownOpen] = useState(false);
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
     const [medicamentos, setMedicamentos] = useState<Medicamento[]>([]);
     const [detalles, setDetalles] = useState<DetalleConteo[]>([]);
@@ -45,7 +50,7 @@ const AdminPanel: React.FC = () => {
     const [loading, setLoading] = useState(false);
 
     // Form states for assignment
-    const [selectedUser, setSelectedUser] = useState<number | ''>('');
+    const [selectedUser, setSelectedUser] = useState<number | string | ''>('');
     const [selectedMed, setSelectedMed] = useState<number | ''>('');
     const [assignDate, setAssignDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [searchTerm, setSearchTerm] = useState('');
@@ -55,18 +60,22 @@ const AdminPanel: React.FC = () => {
     // Filter states for reports
     const [startDate, setStartDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [endDate, setEndDate] = useState(new Date().toLocaleDateString('en-CA'));
-    const [filterUser, setFilterUser] = useState<number | ''>('');
+    const [filterUser, setFilterUser] = useState<number | string | ''>('');
 
     useEffect(() => {
         const fetchMeds = async () => {
             if (activeTab === 'asignar' && medSearchTerm.length > 2) {
-                const results = await searchMedicamentos(medSearchTerm);
+                // Si selectedUser es un string, es el código/nombre de la sede
+                const isSede = typeof selectedUser === 'string';
+                const sedeFilter = isSede ? (selectedUser as string) : undefined;
+                
+                const results = await searchMedicamentos(medSearchTerm, 50, sedeFilter);
                 setMedResults(results);
             }
         };
         const timer = setTimeout(fetchMeds, 300);
         return () => clearTimeout(timer);
-    }, [medSearchTerm, activeTab]);
+    }, [medSearchTerm, activeTab, selectedUser]);
 
     useEffect(() => {
         loadInitialData();
@@ -75,26 +84,25 @@ const AdminPanel: React.FC = () => {
     const loadInitialData = async () => {
         setLoading(true);
         try {
+            const [configs, uData] = await Promise.all([
+                getAllSedeConfigs(),
+                getAllUsuarios()
+            ]);
+            setSedeConfigs(configs);
+            setUsuarios(uData.filter(u => u.idRol === 1));
+
             if (activeTab === 'usuarios') {
-                const [configs, summary, uData] = await Promise.all([
-                    getAllSedeConfigs(),
-                    getMedicamentoSummary(),
-                    getAllUsuarios()
-                ]);
-                setSedeConfigs(configs);
+                const summary = await getMedicamentoSummary();
                 setMedSummary(summary);
-                setUsuarios(uData.filter(u => u.idRol === 1));
-            } else if (activeTab === 'asignar') {
-                const uData = await getAllUsuarios();
-                setUsuarios(uData.filter(u => u.idRol === 1));
-                // No cargamos medicamentos aquí, se buscan dinámicamente
-            }
-            else if (activeTab === 'reportes') {
+            } else if (activeTab === 'reportes') {
+                // Determine if filterUser is a number (idUsuario) or string (sedeName)
+                const isSede = typeof filterUser === 'string';
                 const data = await getAllDetalles(
-                    filterUser ? Number(filterUser) : undefined,
+                    !isSede && filterUser ? Number(filterUser) : undefined,
                     undefined,
                     startDate,
-                    endDate
+                    endDate,
+                    isSede ? filterUser : undefined
                 );
                 setDetalles(data);
             } else if (activeTab === 'seguimiento') {
@@ -120,11 +128,38 @@ const AdminPanel: React.FC = () => {
 
     const filteredSeguimiento = useMemo(() => {
         if (!seguimientoMensual) return [];
-        return seguimientoMensual.reportePorSedes.filter(item =>
-            item.usuario?.toLowerCase().includes(searchTermSeguimiento.toLowerCase()) ||
-            item.sede?.toLowerCase().includes(searchTermSeguimiento.toLowerCase())
-        );
-    }, [seguimientoMensual, searchTermSeguimiento]);
+        
+        const grouped: Record<string, SeguimientoMensualDTO> = {};
+        
+        seguimientoMensual.reportePorSedes
+            .filter(item => item.sede !== '000') // Excluir sede dummy 000
+            .forEach(item => {
+                const sedeKey = item.sede || 'Global';
+                if (!grouped[sedeKey]) {
+                    grouped[sedeKey] = { ...item };
+                } else {
+                    const existing = grouped[sedeKey];
+                    existing.totalA += item.totalA;
+                    existing.totalB += item.totalB;
+                    existing.totalC += item.totalC;
+                    existing.contadasA += item.contadasA;
+                    existing.contadasB += item.contadasB;
+                    existing.contadasC += item.contadasC;
+                    existing.aContadasUnaVez += item.aContadasUnaVez;
+                    existing.aContadasDosVeces += item.aContadasDosVeces;
+                    // Recalcular cobertura
+                    const total = existing.totalA + existing.totalB + existing.totalC;
+                    const contadas = existing.contadasA + existing.contadasB + existing.contadasC;
+                    existing.coberturaSede = total > 0 ? (contadas / total) * 100 : 0;
+                }
+            });
+
+        return Object.values(grouped).filter(item => {
+            const sedeName = sedeConfigs.find(s => s.codigoSede === item.sede)?.nombre || item.sede || '';
+            return sedeName.toLowerCase().includes(searchTermSeguimiento.toLowerCase()) || 
+                   item.sede?.toLowerCase().includes(searchTermSeguimiento.toLowerCase());
+        });
+    }, [seguimientoMensual, searchTermSeguimiento, sedeConfigs]);
 
     const handleToggleExtraBlock = async (id: number) => {
         try {
@@ -198,7 +233,7 @@ const AdminPanel: React.FC = () => {
 
     const handleCreateAssignment = async () => {
         if (!selectedUser || !selectedMed || !assignDate) {
-            Swal.fire('Campos incompletos', 'Por favor selecciona un usuario, un medicamento y una fecha.', 'warning');
+            Swal.fire('Campos incompletos', 'Por favor selecciona una sede/usuario, un medicamento y una fecha.', 'warning');
             return;
         }
 
@@ -208,26 +243,46 @@ const AdminPanel: React.FC = () => {
             const now = new Date();
             const horaActual = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-            await createPersonalizado({
-                idUsuario: Number(selectedUser),
-                idMedicamento: Number(selectedMed),
-                fechaProgramacion: assignDate,
-                fechaRegistro: fechaHoy,
-                horaRegistro: horaActual
-            });
+            const isSede = typeof selectedUser === 'string';
+            
+            if (isSede) {
+                // Encontrar todos los operarios de esta sede
+                const usersOfSede = usuarios.filter(u => u.sede === selectedUser);
+                if (usersOfSede.length === 0) {
+                    throw new Error("No hay usuarios operarios vinculados a esta sede.");
+                }
+                
+                await Promise.all(usersOfSede.map(u => 
+                    createPersonalizado({
+                        idUsuario: u.id,
+                        idMedicamento: Number(selectedMed),
+                        fechaProgramacion: assignDate,
+                        fechaRegistro: fechaHoy,
+                        horaRegistro: horaActual
+                    })
+                ));
+            } else {
+                await createPersonalizado({
+                    idUsuario: Number(selectedUser),
+                    idMedicamento: Number(selectedMed),
+                    fechaProgramacion: assignDate,
+                    fechaRegistro: fechaHoy,
+                    horaRegistro: horaActual
+                });
+            }
 
             Swal.fire({
                 icon: 'success',
                 title: 'Asignación Exitosa',
-                text: 'El medicamento ha sido programado para el usuario.',
+                text: isSede ? `El medicamento ha sido programado para todos los operarios de la sede ${selectedUser}.` : 'El medicamento ha sido programado para el usuario.',
                 confirmButtonColor: '#f6952c',
                 customClass: { popup: 'rounded-3xl' }
             });
 
             setSelectedMed('');
             setMedSearchTerm('');
-        } catch (error) {
-            Swal.fire('Error', 'No se pudo realizar la asignación personalizada.', 'error');
+        } catch (error: any) {
+            Swal.fire('Error', error.message || 'No se pudo realizar la asignación personalizada.', 'error');
         } finally {
             setLoading(false);
         }
@@ -240,48 +295,93 @@ const AdminPanel: React.FC = () => {
     const downloadReport = () => {
         let filteredData = [...detalles];
 
-        // Aplicar filtros de fecha y usuario
+        // Aplicar filtros adicionales de seguridad (aunque ya vienen filtrados por API)
         if (startDate) filteredData = filteredData.filter(d => d.fechaRegistro >= startDate);
         if (endDate) filteredData = filteredData.filter(d => d.fechaRegistro <= endDate);
-        if (filterUser) filteredData = filteredData.filter(d => d.idUsuario === Number(filterUser));
+        
+        if (filterUser) {
+            const isSede = typeof filterUser === 'string';
+            if (isSede) {
+                filteredData = filteredData.filter(d => d.usuario?.sede === filterUser);
+            } else {
+                filteredData = filteredData.filter(d => d.idUsuario === Number(filterUser));
+            }
+        }
 
         if (filteredData.length === 0) {
-            Swal.fire('Sin datos', 'No hay registros que coincidan con los filtros seleccionados.', 'info');
+            Swal.fire({
+                icon: 'info',
+                title: 'Sin datos para exportar',
+                text: 'No hay registros que coincidan con los filtros actuales.',
+                confirmButtonColor: '#f6952c'
+            });
             return;
         }
 
-        // Mapeamos los datos con nombres de columnas legibles para Excel
-        const excelData = filteredData.map(d => ({
-            'ID REPORTE': d.id,
-            'MEDICAMENTO': d.medicamento?.descripcion || 'N/A',
-            'PLU': d.medicamento?.plu || 'N/A',
-            'USUARIO': d.usuario?.usuario?.toUpperCase() || 'N/A',
-            'SEDE': d.usuario?.sede?.toUpperCase() || 'GLOBAL',
-            'LOTE': d.lote || 'N/A',
-            'VENCIMIENTO': d.fechaVencimiento || 'N/A',
-            'CANT. CONTADA': d.cantidadContada === null ? 'SIN CONTAR' : d.cantidadContada,
-            'CANT. TEORICA': d.cantidadActual,
-            'DIFERENCIA': d.cantidadContada !== null ? (d.cantidadContada - d.cantidadActual) : 'PÉRDIDA TÉCNICA (X)',
-            'FECHA': d.fechaRegistro,
-            'HORA REPORTE': d.horaRegistro || 'PENDIENTE',
-            'TIPO CONTEO': d.tipoConteo
-        }));
+        // Mapeamos los datos con una estructura profesional y completa
+        const excelData = filteredData.map(d => {
+            const diferencia = d.cantidadContada !== null ? (d.cantidadContada - d.cantidadActual) : 0;
+            const diffPorcentaje = d.cantidadActual > 0 ? (diferencia / d.cantidadActual) * 100 : 0;
+            
+            return {
+                'SEDE / PUNTO': d.usuario?.sede?.toUpperCase() || 'GLOBAL',
+                'OPERARIO': d.usuario?.usuario?.toUpperCase() || 'N/A',
+                'FECHA PROCESO': d.fechaRegistro,
+                'HORA': d.horaRegistro || 'PENDIENTE',
+                'TIPO': d.tipoConteo,
+                'ABC': d.medicamento?.tipomolecula || 'C',
+                'PLU': d.medicamento?.plu || 'N/A',
+                'DESCRIPCION': d.medicamento?.descripcion || 'N/A',
+                'LOTE': d.lote || 'SIN LOTE',
+                'VENCIMIENTO': d.fechaVencimiento || 'N/A',
+                'SISTEMA (TEÓRICO)': d.cantidadActual,
+                'CONTEO FÍSICO': d.cantidadContada === null ? 0 : d.cantidadContada,
+                'DIFERENCIA UNID.': diferencia,
+                '% DESVIACIÓN': `${diffPorcentaje.toFixed(2)}%`,
+                'ESTADO': d.cantidadContada === null ? 'PENDIENTE' : 'FINALIZADO',
+                'VALOR UNIT.': d.medicamento?.costo || 0,
+                'VALOR DIFERENCIA': diferencia * (d.medicamento?.costo || 0)
+            };
+        });
 
-        // Crear el libro de trabajo (WorkBook) y la hoja (WorkSheet)
         const worksheet = XLSX.utils.json_to_sheet(excelData);
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Reporte Inventario");
 
-        // Ajustar anchos de columna básicos
-        const wscols = [
-            { wch: 12 }, { wch: 40 }, { wch: 12 }, { wch: 15 }, { wch: 15 },
-            { wch: 15 }, { wch: 15 }, // LOTE y VENCIMIENTO
-            { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 }
+        // Configuración de anchos de columna para una visualización premium
+        worksheet['!cols'] = [
+            { wch: 15 }, // SEDE
+            { wch: 20 }, // OPERARIO
+            { wch: 15 }, // FECHA
+            { wch: 12 }, // HORA
+            { wch: 15 }, // TIPO
+            { wch: 8 },  // ABC
+            { wch: 12 }, // PLU
+            { wch: 45 }, // DESCRIPCION
+            { wch: 15 }, // LOTE
+            { wch: 15 }, // VENCIMIENTO
+            { wch: 18 }, // SISTEMA
+            { wch: 18 }, // FISICO
+            { wch: 18 }, // DIF UNID
+            { wch: 15 }, // % DESVIACION
+            { wch: 15 }, // ESTADO
+            { wch: 15 }, // VALOR UNIT
+            { wch: 20 }  // VALOR DIF
         ];
-        worksheet['!cols'] = wscols;
 
-        // Descargar el archivo
-        XLSX.writeFile(workbook, `REPORTE_CONTEO_${startDate}_AL_${endDate}.xlsx`);
+        // Nombre de archivo descriptivo
+        const fileName = `REPORTE_CONTEO_${filterUser || 'GENERAL'}_${startDate}_AL_${endDate}.xlsx`.replace(/\s+/g, '_');
+        XLSX.writeFile(workbook, fileName);
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Reporte Generado',
+            text: 'El archivo Excel se ha descargado correctamente.',
+            toast: true,
+            position: 'top-end',
+            timer: 3000,
+            showConfirmButton: false
+        });
     };
 
     const handleMainUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -400,6 +500,81 @@ const AdminPanel: React.FC = () => {
             }
         };
         reader.readAsBinaryString(file);
+    };
+
+    const handleMaestraImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        Swal.fire({
+            title: '<span class="text-xl font-black text-gray-900 uppercase italic">Importando Maestra</span>',
+            html: `
+                <div class="py-10">
+                    <div class="w-20 h-20 border-8 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-6 shadow-2xl shadow-blue-500/20"></div>
+                    <p class="text-gray-500 font-bold uppercase tracking-widest text-xs animate-pulse">Procesando archivo SIESA...</p>
+                </div>
+            `,
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+
+        try {
+            const response = await importMaestra(file);
+            
+            const hasSkipped = response.detallesOmitidos && response.detallesOmitidos.length > 0;
+
+            Swal.fire({
+                icon: response.estado === 'EXITOSO' ? 'success' : 'warning',
+                title: `<span class="text-xl font-black text-gray-900 uppercase italic">Resultado de Importación</span>`,
+                html: `
+                    <div class="text-left bg-gray-50 p-6 rounded-2xl mt-4 border border-gray-100">
+                        <div class="grid grid-cols-3 gap-2 mb-4">
+                            <div class="bg-white p-2 rounded-xl border border-gray-100 text-center">
+                                <p class="text-lg font-black text-gray-400">${response.leidos || 0}</p>
+                                <p class="text-[7px] font-bold text-gray-400 uppercase">Leídos</p>
+                            </div>
+                            <div class="bg-white p-2 rounded-xl border border-gray-100 text-center shadow-sm">
+                                <p class="text-lg font-black text-blue-500">${response.procesados}</p>
+                                <p class="text-[7px] font-bold text-gray-400 uppercase">Únicos</p>
+                            </div>
+                            <div class="bg-white p-2 rounded-xl border border-gray-100 text-center">
+                                <p class="text-lg font-black text-orange-400">${response.duplicadosOmitidos || 0}</p>
+                                <p class="text-[7px] font-bold text-gray-400 uppercase">Duplicados</p>
+                            </div>
+                        </div>
+                        
+                        ${hasSkipped ? `
+                            <div class="mt-4">
+                                <p class="text-[10px] font-black text-red-400 uppercase mb-1">Detalle de líneas con error:</p>
+                                <pre class="text-[9px] text-gray-500 overflow-auto max-h-40 bg-white p-3 rounded-xl border border-gray-100 font-mono">
+                                    ${response.detallesOmitidos.join('\n')}
+                                </pre>
+                            </div>
+                        ` : `
+                            <div class="bg-emerald-50 p-3 rounded-xl border border-emerald-100 text-center">
+                                <p class="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+                                    ¡Sincronización Completada!
+                                </p>
+                                <p class="text-[8px] text-emerald-500 font-bold mt-1">
+                                    ${response.procesados} productos actualizados correctamente.
+                                </p>
+                            </div>
+                        `}
+                    </div>
+                `,
+                confirmButtonColor: '#3b82f6',
+                customClass: { popup: 'rounded-[3rem] w-[35rem]' }
+            });
+        } catch (error: any) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error de Red',
+                text: 'No se pudo conectar con el servidor: ' + (error.response?.data?.message || error.message),
+                confirmButtonColor: '#ef4444'
+            });
+        } finally {
+            if (e.target) e.target.value = '';
+        }
     };
 
     const downloadTemplate = (type: 'medicamento' | 'inventario' = 'medicamento') => {
@@ -636,23 +811,56 @@ const AdminPanel: React.FC = () => {
                             </div>
 
                             <div className="grid grid-cols-1 gap-6">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">1. Seleccionar Usuario</label>
-                                    <select
-                                        value={selectedUser}
-                                        onChange={(e) => {
-                                            const val = e.target.value;
-                                            setSelectedUser(val === "" ? "" : Number(val));
-                                            setSelectedMed(""); // Limpiar medicamento al cambiar sede
-                                            setMedSearchTerm("");
-                                        }}
-                                        className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 cursor-pointer"
-                                    >
-                                        <option value="">Selecciona un usuario...</option>
-                                        {usuarios.map(u => (
-                                            <option key={u.id} value={u.id}>{u.usuario.toUpperCase()} - {u.sede || 'Global'}</option>
-                                        ))}
-                                    </select>
+                                <div className="space-y-2 relative">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">1. Seleccionar Sede</label>
+                                    <div className="relative">
+                                        <IconSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
+                                        <input
+                                            type="text"
+                                            placeholder="Escribe el nombre o código de la sede..."
+                                            value={assignSearchTerm}
+                                            onFocus={() => setIsAssignDropdownOpen(true)}
+                                            onChange={(e) => {
+                                                setAssignSearchTerm(e.target.value);
+                                                setIsAssignDropdownOpen(true);
+                                                if (e.target.value === "") {
+                                                    setSelectedUser("");
+                                                    setSelectedMed("");
+                                                    setMedSearchTerm("");
+                                                }
+                                            }}
+                                            className="w-full pl-12 pr-6 py-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-orange-500 outline-none font-bold text-gray-700 transition-all"
+                                        />
+                                    </div>
+
+                                    {isAssignDropdownOpen && (
+                                        <div className="absolute z-50 w-full mt-2 bg-white border border-gray-100 rounded-2xl shadow-2xl max-h-60 overflow-y-auto overflow-x-hidden">
+                                            {sedeConfigs.filter(s => 
+                                                (s.nombre || '').toLowerCase().includes(assignSearchTerm.toLowerCase()) || 
+                                                s.codigoSede.toLowerCase().includes(assignSearchTerm.toLowerCase())
+                                            ).map(s => (
+                                                <button
+                                                    key={s.id}
+                                                    onClick={() => {
+                                                        setSelectedUser(s.codigoSede); // Guardamos el código de sede
+                                                        setAssignSearchTerm(s.nombre ? `${s.nombre.toUpperCase()} (${s.codigoSede})` : `SEDE ${s.codigoSede}`);
+                                                        setIsAssignDropdownOpen(false);
+                                                        setSelectedMed(""); 
+                                                        setMedSearchTerm("");
+                                                    }}
+                                                    className={`w-full text-left p-4 hover:bg-gray-50 flex items-center gap-3 border-b border-gray-50 last:border-0 transition-colors ${selectedUser === s.codigoSede ? 'bg-orange-50' : ''}`}
+                                                >
+                                                    <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center font-black">
+                                                        {(s.nombre || s.codigoSede).charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-sm font-black text-gray-900">{s.nombre ? s.nombre.toUpperCase() : `SEDE ${s.codigoSede}`}</span>
+                                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Código: {s.codigoSede}</span>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="space-y-2">
@@ -730,12 +938,57 @@ const AdminPanel: React.FC = () => {
                                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Hasta</label>
                                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full p-4 bg-white rounded-2xl border-none shadow-sm font-bold" />
                                 </div>
-                                <div className="space-y-2">
+                                <div className="space-y-2 relative">
                                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sede</label>
-                                    <select value={filterUser} onChange={e => setFilterUser(e.target.value ? Number(e.target.value) : '')} className="w-full p-4 bg-white rounded-2xl border-none shadow-sm font-bold">
-                                        <option value="">TODAS</option>
-                                        {usuarios.map(u => <option key={u.id} value={u.id}>{u.usuario.toUpperCase()} ({u.sede})</option>)}
-                                    </select>
+                                    <div className="relative">
+                                        <IconSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300" size={16} />
+                                        <input
+                                            type="text"
+                                            placeholder="TODAS LAS SEDES..."
+                                            value={reportSearchTerm}
+                                            onFocus={() => setIsReportDropdownOpen(true)}
+                                            onChange={(e) => {
+                                                setReportSearchTerm(e.target.value);
+                                                setIsReportDropdownOpen(true);
+                                                if (e.target.value === "") setFilterUser("");
+                                            }}
+                                            className="w-full pl-10 pr-4 py-4 bg-white rounded-2xl border-none shadow-sm font-bold text-gray-700 outline-none focus:ring-2 focus:ring-orange-500/20"
+                                        />
+                                    </div>
+
+                                    {isReportDropdownOpen && (
+                                        <div className="absolute z-50 w-full mt-2 bg-white border border-gray-100 rounded-2xl shadow-2xl max-h-48 overflow-y-auto overflow-x-hidden">
+                                            <button
+                                                onClick={() => {
+                                                    setFilterUser("");
+                                                    setReportSearchTerm("TODAS LAS SEDES");
+                                                    setIsReportDropdownOpen(false);
+                                                }}
+                                                className="w-full text-left p-3 hover:bg-orange-50 font-black text-[10px] text-orange-500 uppercase tracking-widest border-b border-gray-50 transition-colors"
+                                            >
+                                                Ver Todas las Sedes
+                                            </button>
+                                            {sedeConfigs.filter(s => 
+                                                (s.nombre || '').toLowerCase().includes(reportSearchTerm.toLowerCase()) || 
+                                                s.codigoSede.toLowerCase().includes(reportSearchTerm.toLowerCase())
+                                            ).map(s => (
+                                                <button
+                                                    key={s.id}
+                                                    onClick={() => {
+                                                        setFilterUser(s.codigoSede); // Guardamos el código de sede (string)
+                                                        setReportSearchTerm(s.nombre ? `${s.nombre.toUpperCase()} (${s.codigoSede})` : `SEDE ${s.codigoSede}`);
+                                                        setIsReportDropdownOpen(false);
+                                                    }}
+                                                    className={`w-full text-left p-3 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-50 last:border-0 transition-colors ${filterUser === s.codigoSede ? 'bg-orange-50' : ''}`}
+                                                >
+                                                    <div className="flex flex-col">
+                                                        <span className="text-xs font-black text-gray-900">{s.nombre ? s.nombre.toUpperCase() : `SEDE ${s.codigoSede}`}</span>
+                                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Código: {s.codigoSede}</span>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -792,6 +1045,36 @@ const AdminPanel: React.FC = () => {
                                             className="px-10 py-4 bg-gray-900 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 cursor-pointer hover:bg-orange-500 transition-all shadow-xl shadow-gray-900/10"
                                         >
                                             <IconUpload size={18} /> Iniciar Sincronización
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* NUEVA SECCIÓN: MAESTRA DE MEDICAMENTOS */}
+                            <div className="bg-blue-50/50 p-8 rounded-[2.5rem] border-2 border-dashed border-blue-200 text-center space-y-6">
+                                <div className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center text-white mx-auto shadow-2xl shadow-blue-600/20">
+                                    <IconMedicineSyrup size={40} />
+                                </div>
+                                <div className="space-y-2">
+                                    <h4 className="text-xl font-black text-gray-900 uppercase">Maestra de Medicamentos (Catálogo)</h4>
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-relaxed px-10">
+                                        Carga el catálogo maestro para unificar descripciones, laboratorios y datos técnicos de todos los productos.
+                                    </p>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+                                    <div className="relative">
+                                        <input
+                                            type="file"
+                                            id="maestra-upload"
+                                            className="hidden"
+                                            accept=".xlsx, .xls, .csv"
+                                            onChange={handleMaestraImport}
+                                        />
+                                        <label
+                                            htmlFor="maestra-upload"
+                                            className="px-10 py-4 bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 cursor-pointer hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/10"
+                                        >
+                                            <IconUpload size={18} /> Importar Catálogo Maestro
                                         </label>
                                     </div>
                                 </div>
@@ -917,40 +1200,45 @@ const AdminPanel: React.FC = () => {
                             <table className="w-full text-left">
                                 <thead className="bg-gray-50 border-b border-gray-100">
                                     <tr>
-                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest italic text-left">Usuario / Farmacia</th>
-                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Cobertura</th>
-                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">A (1x / 2x)</th>
-                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Tipo B</th>
-                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Tipo C</th>
-                                        {/* <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Programación Extra</th> */}
+                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest italic text-left">Sede Operativa</th>
+                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Avance General</th>
+                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Progreso Tipo A (1x/2x)</th>
+                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Métricas B</th>
+                                        <th className="px-8 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center italic">Métricas C</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredSeguimiento.map((userStat: SeguimientoMensualDTO) => (
-                                        <tr key={userStat.usuario + "_" + userStat.sede} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                                            <td className="px-8 py-6 text-left">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center font-black">
-                                                        {(userStat.usuario || userStat.sede || '?').charAt(0).toUpperCase()}
-                                                    </div>
-                                                    <div>
-                                                        <div className="font-black text-gray-900 text-sm uppercase">
-                                                            {userStat.usuario || `SEDE ${userStat.sede}`}
+                                    {filteredSeguimiento.map((sedeStat: SeguimientoMensualDTO) => {
+                                        const configSede = sedeConfigs.find(s => s.codigoSede === sedeStat.sede);
+                                        const operariosCount = usuarios.filter(u => u.sede === sedeStat.sede).length;
+                                        
+                                        return (
+                                            <tr key={sedeStat.sede} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                                                <td className="px-8 py-6 text-left">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-12 h-12 bg-gray-900 text-white rounded-2xl flex items-center justify-center font-black shadow-lg shadow-gray-900/10">
+                                                            {(configSede?.nombre || sedeStat.sede || '?').charAt(0).toUpperCase()}
                                                         </div>
-                                                        {userStat.usuario && userStat.sede && userStat.usuario !== userStat.sede && (
-                                                            <div className="text-[10px] font-bold text-gray-400 tracking-widest uppercase italic">Sede: {userStat.sede}</div>
-                                                        )}
-                                                        <span className="text-[8px] font-black text-gray-300 bg-gray-50 px-2 py-0.5 rounded uppercase tracking-tighter mt-1 block w-fit">
-                                                            Catálogo: {userStat.totalA + userStat.totalB + userStat.totalC}
-                                                        </span>
+                                                        <div>
+                                                            <div className="font-black text-gray-900 text-base uppercase tracking-tight">
+                                                                {configSede?.nombre || `SEDE ${sedeStat.sede}`}
+                                                            </div>
+                                                            <div className="flex items-center gap-2 mt-1">
+                                                                <span className="text-[9px] font-black text-orange-500 bg-orange-50 px-2 py-0.5 rounded uppercase tracking-widest">
+                                                                    {sedeStat.totalA + sedeStat.totalB + sedeStat.totalC} ítems
+                                                                </span>
+                                                                <span className="text-[9px] font-black text-blue-500 bg-blue-50 px-2 py-0.5 rounded uppercase tracking-widest">
+                                                                    {operariosCount} Operarios {operariosCount === 0 ? '(Sin asignar)' : ''}
+                                                                </span>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </td>
+                                                </td>
                                             <td className="px-8 py-6 text-center">
                                                 <div className="flex flex-col items-center gap-1">
-                                                    <span className="text-xl font-black text-orange-500">{Math.round(userStat.coberturaSede)}%</span>
+                                                    <span className="text-xl font-black text-orange-500">{Math.round(sedeStat.coberturaSede)}%</span>
                                                     <div className="w-20 h-1 bg-gray-100 rounded-full overflow-hidden">
-                                                        <div className="h-full bg-orange-500" style={{ width: `${userStat.coberturaSede}%` }}></div>
+                                                        <div className="h-full bg-orange-500" style={{ width: `${sedeStat.coberturaSede}%` }}></div>
                                                     </div>
                                                 </div>
                                             </td>
@@ -958,56 +1246,35 @@ const AdminPanel: React.FC = () => {
                                                 <div className="flex flex-col gap-2 max-w-[120px] mx-auto">
                                                     <div className="flex justify-between items-center text-[10px] font-black">
                                                         <span className="text-gray-400 italic">1x</span>
-                                                        <span className="text-blue-500">{userStat.contadasA} / {userStat.totalA}</span>
+                                                        <span className="text-blue-500">{sedeStat.contadasA} / {sedeStat.totalA}</span>
                                                     </div>
                                                     <div className="flex justify-between items-center text-[10px] font-black">
                                                         <span className="text-gray-400 italic">2x</span>
-                                                        <span className="text-emerald-500">{userStat.aContadasDosVeces} / {userStat.totalA}</span>
+                                                        <span className="text-emerald-500">{sedeStat.aContadasDosVeces} / {sedeStat.totalA}</span>
                                                     </div>
                                                 </div>
                                             </td>
                                             <td className="px-8 py-6 text-center">
                                                 <div className="w-10 h-10 rounded-full border-4 border-gray-50 flex flex-col items-center justify-center mx-auto relative group">
-                                                    <span className="text-[8px] font-black text-gray-900 leading-tight">{userStat.contadasB}</span>
-                                                    <span className="text-[6px] font-bold text-gray-400 border-t border-gray-200 pt-0.5">{userStat.totalB}</span>
+                                                    <span className="text-[8px] font-black text-gray-900 leading-tight">{sedeStat.contadasB}</span>
+                                                    <span className="text-[6px] font-bold text-gray-400 border-t border-gray-200 pt-0.5">{sedeStat.totalB}</span>
                                                     <svg className="absolute inset-0 w-full h-full -rotate-90">
-                                                        <circle cx="20" cy="20" r="18" fill="none" stroke="#f6952c" strokeWidth="4" strokeDasharray="113" strokeDashoffset={113 - (113 * (userStat.contadasB / (userStat.totalB || 1)))} strokeLinecap="round" className="opacity-40" />
+                                                        <circle cx="20" cy="20" r="18" fill="none" stroke="#f6952c" strokeWidth="4" strokeDasharray="113" strokeDashoffset={113 - (113 * (sedeStat.contadasB / (sedeStat.totalB || 1)))} strokeLinecap="round" className="opacity-40" />
                                                     </svg>
                                                 </div>
                                             </td>
                                             <td className="px-8 py-6 text-center">
                                                 <div className="w-10 h-10 rounded-full border-4 border-gray-50 flex flex-col items-center justify-center mx-auto relative">
-                                                    <span className="text-[8px] font-black text-gray-900 leading-tight">{userStat.contadasC}</span>
-                                                    <span className="text-[6px] font-bold text-gray-400 border-t border-gray-200 pt-0.5">{userStat.totalC}</span>
+                                                    <span className="text-[8px] font-black text-gray-900 leading-tight">{sedeStat.contadasC}</span>
+                                                    <span className="text-[6px] font-bold text-gray-400 border-t border-gray-200 pt-0.5">{sedeStat.totalC}</span>
                                                     <svg className="absolute inset-0 w-full h-full -rotate-90">
-                                                        <circle cx="20" cy="20" r="18" fill="none" stroke="#22c55e" strokeWidth="4" strokeDasharray="113" strokeDashoffset={113 - (113 * (userStat.contadasC / (userStat.totalC || 1)))} strokeLinecap="round" className="opacity-40" />
+                                                        <circle cx="20" cy="20" r="18" fill="none" stroke="#22c55e" strokeWidth="4" strokeDasharray="113" strokeDashoffset={113 - (113 * (sedeStat.contadasC / (sedeStat.totalC || 1)))} strokeLinecap="round" className="opacity-40" />
                                                     </svg>
                                                 </div>
                                             </td>
-                                            {/* <td className="px-8 py-6 text-center">
-                                                <div className="flex items-center justify-center">
-                                                    {userStat.fechaBloqueExtra && userStat.fechaBloqueExtra.startsWith(new Date().toLocaleDateString('en-CA')) ? (
-                                                        <div className="flex flex-col items-center gap-1">
-                                                            <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center shadow-inner animate-pulse">
-                                                                <IconCalendarPlus size={16} />
-                                                            </div>
-                                                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-tighter">Habilitado Hoy</span>
-                                                        </div>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => handleToggleExtraBlock(userStat.idUsuario)}
-                                                            className="group flex flex-col items-center gap-1 hover:scale-105 transition-all"
-                                                        >
-                                                            <div className="w-8 h-8 bg-gray-50 text-gray-400 group-hover:bg-orange-500 group-hover:text-white rounded-full flex items-center justify-center transition-all shadow-sm">
-                                                                <IconCalendarPlus size={16} />
-                                                            </div>
-                                                            <span className="text-[8px] font-black text-gray-300 group-hover:text-orange-500 uppercase tracking-tighter">Habilitar Bloque</span>
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </td> */}
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>

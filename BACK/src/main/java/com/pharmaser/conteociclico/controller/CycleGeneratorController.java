@@ -29,8 +29,7 @@ public class CycleGeneratorController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(null);
         } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.internalServerError().header("X-Error-Message", e.getMessage() != null ? e.getMessage() : e.toString()).build();
+            return ResponseEntity.status(500).build();
         }
     }
 }

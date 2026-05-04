@@ -29,4 +29,7 @@ public interface DetalleConteoRepository extends JpaRepository<DetalleConteo, In
 
     @org.springframework.data.jpa.repository.Query("SELECT d FROM DetalleConteo d JOIN d.usuario u WHERE u.sede = :sede AND d.fechaRegistro = :fecha")
     List<DetalleConteo> findBySedeAndFecha(@org.springframework.data.repository.query.Param("sede") String sede, @org.springframework.data.repository.query.Param("fecha") LocalDate fecha);
+
+    @org.springframework.data.jpa.repository.Query("SELECT d FROM DetalleConteo d JOIN d.usuario u WHERE u.sede = :sede AND d.fechaRegistro BETWEEN :start AND :end")
+    List<DetalleConteo> findBySedeAndFechaRegistroBetween(@org.springframework.data.repository.query.Param("sede") String sede, @org.springframework.data.repository.query.Param("start") LocalDate start, @org.springframework.data.repository.query.Param("end") LocalDate end);
 }

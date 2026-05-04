@@ -37,6 +37,9 @@ public class MedicamentoService {
     @Autowired
     private com.pharmaser.conteociclico.repository.LogClasificacionAbcRepository logAbcRepository;
 
+    @Autowired
+    private MaestraMedicamentoService maestraService;
+
     private static final String LOCK_NAME = "ABC_RECLASSIFICATION";
     private static final int LOCK_TIMEOUT_MINUTES = 15;
     private final String instanciaId = java.util.UUID.randomUUID().toString();
@@ -55,6 +58,13 @@ public class MedicamentoService {
             // Indice para Detalle Conteo
             executeIndexIfNotExists("idx_detalle_usr_fecha",
                     "ALTER TABLE detalleconteo ADD INDEX idx_detalle_usr_fecha (idusuario, fecharegistro)");
+
+            // Columna Codigo Generico
+            try {
+                jdbcTemplate.execute("ALTER TABLE medicamento ADD COLUMN IF NOT EXISTS codigogenerico VARCHAR(255)");
+            } catch (Exception e) {
+                // Fallback para motores que no soportan IF NOT EXISTS o si ya existe
+            }
         } catch (Exception e) {
             logger.error("Error inicializando índices: {}", e.getMessage());
         }
@@ -133,12 +143,12 @@ public class MedicamentoService {
         if (items == null || items.isEmpty())
             return;
 
-        String sql = "INSERT INTO medicamento (plu, idusuario, descripcion, inventario, costo, costototal, tipomolecula, estadodelconteo, fecha_clasificacion, fecha_actualizacion, contado_mes_anterior) "
+        String sql = "INSERT INTO medicamento (plu, idusuario, descripcion, inventario, costo, costototal, tipomolecula, estadodelconteo, fecha_clasificacion, fecha_actualizacion, contado_mes_anterior, codigogenerico) "
                 +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 'no', ?, ?, 0) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'no', ?, ?, 0, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
                 "descripcion = VALUES(descripcion), " +
-                "inventario = VALUES(inventario), costo = VALUES(costo), costototal = VALUES(costototal), tipomolecula = VALUES(tipomolecula), fecha_clasificacion = VALUES(fecha_clasificacion), fecha_actualizacion = VALUES(fecha_actualizacion)";
+                "inventario = VALUES(inventario), costo = VALUES(costo), costototal = VALUES(costototal), tipomolecula = VALUES(tipomolecula), fecha_clasificacion = VALUES(fecha_clasificacion), fecha_actualizacion = VALUES(fecha_actualizacion), codigogenerico = VALUES(codigogenerico)";
 
         java.time.LocalDateTime ahora = java.time.LocalDateTime.now();
 
@@ -167,6 +177,7 @@ public class MedicamentoService {
                     ps.setString(7, item.getTipomolecula());
                     ps.setObject(8, item.getFechaClasificacion());
                     ps.setObject(9, ahora);
+                    ps.setString(10, item.getCodigogenerico());
                 }
 
                 @Override
@@ -200,6 +211,11 @@ public class MedicamentoService {
             Map<String, Integer> userSedeMap, StringBuilder logBuilder) {
         List<MedicamentoImportDTO> validItems = new ArrayList<>();
         int lineNum = 1;
+        int crossedCount = 0;
+        int originalCount = 0;
+
+        // Cargar maestra en memoria para este lote
+        Map<String, String> masterMap = maestraService.getPluDescriptionMap();
 
         for (Map<String, String> row : rawData) {
             lineNum++;
@@ -224,7 +240,6 @@ public class MedicamentoService {
                             normalized.getOrDefault("último costo", "0")));
 
             if (plu.isEmpty()) {
-                // Try alternate key with possible invisible chars
                 for (String k : normalized.keySet()) {
                     if (k.contains("plu")) {
                         plu = normalized.get(k);
@@ -247,12 +262,6 @@ public class MedicamentoService {
             }
 
             try {
-
-                String cleanInv = inventarioStr.replaceAll("[^0-9,-]", "").replace(",", ".");
-                if (cleanInv.contains(".")) {
-
-                }
-
                 int inv = (int) Double
                         .parseDouble(inventarioStr.replace(".", "").replace(",", ".").replaceAll("[^0-9.-]", ""));
                 double cost = Double
@@ -266,11 +275,26 @@ public class MedicamentoService {
 
                 MedicamentoImportDTO dto = new MedicamentoImportDTO();
                 dto.setPlu(plu);
-                dto.setDescripcion(descripcion);
                 dto.setIdUsuario(idUsuario);
                 dto.setInventario(inv);
                 dto.setCosto(cost);
                 dto.setCostoTotal(inv * cost);
+
+                // ENRIQUECIMIENTO CON MAESTRA
+                if (masterMap.containsKey(plu)) {
+                    dto.setDescripcion(masterMap.get(plu));
+                    crossedCount++;
+                } else {
+                    dto.setDescripcion(descripcion);
+                    originalCount++;
+                }
+
+                // Lógica de Código Genérico
+                String codGen = plu;
+                if (plu.contains("_")) {
+                    codGen = plu.substring(0, plu.indexOf("_"));
+                }
+                dto.setCodigogenerico(codGen);
 
                 validItems.add(dto);
             } catch (Exception e) {
@@ -278,6 +302,12 @@ public class MedicamentoService {
                         .append(". Saltando.\n");
             }
         }
+        
+        logBuilder.append("\n--- RESUMEN DE ENRIQUECIMIENTO ---\n");
+        logBuilder.append("Registros con descripción de la MAESTRA: ").append(crossedCount).append("\n");
+        logBuilder.append("Registros con descripción ORIGINAL del archivo: ").append(originalCount).append("\n");
+        logBuilder.append("----------------------------------\n");
+
         return validItems;
     }
 
@@ -288,6 +318,17 @@ public class MedicamentoService {
 
     public Medicamento saveMedicamento(Medicamento medicamento) {
         if (medicamento == null) return null;
+        
+        // Poblar codigogenerico si el PLU está presente
+        if (medicamento.getPlu() != null && !medicamento.getPlu().isEmpty()) {
+            String plu = medicamento.getPlu();
+            String codGen = plu;
+            if (plu.contains("_")) {
+                codGen = plu.substring(0, plu.indexOf("_"));
+            }
+            medicamento.setCodigogenerico(codGen);
+        }
+
         return medicamentoRepository.save(java.util.Objects.requireNonNull(medicamento));
     }
 
@@ -383,9 +424,10 @@ public class MedicamentoService {
                     "SELECT DISTINCT idusuario FROM medicamento WHERE idusuario IS NOT NULL", Integer.class);
 
             int totalA = 0, totalB = 0, totalC = 0;
-            StringBuilder sedeLog = new StringBuilder("Métricas por Sede:\n");
+            StringBuilder sedeLog = new StringBuilder("Métricas por Sede (Clasificación por Familias):\n");
 
             for (Integer idSede : sedes) {
+                // Valor Total de la Sede
                 Double totalValueSede = jdbcTemplate.queryForObject(
                         "SELECT COALESCE(SUM(costototal), 0) FROM medicamento WHERE idusuario = ? AND costototal > 0",
                         Double.class, idSede);
@@ -395,49 +437,67 @@ public class MedicamentoService {
                     continue;
                 }
 
-                java.util.List<Map<String, Object>> meds = jdbcTemplate.queryForList(
-                        "SELECT id, costototal FROM medicamento WHERE idusuario = ? AND costototal > 0 ORDER BY costototal DESC",
+                // Obtener Familias (codigogenerico) ordenadas por su valor total consolidado
+                java.util.List<Map<String, Object>> families = jdbcTemplate.queryForList(
+                        "SELECT codigogenerico, SUM(costototal) as valor_familia " +
+                        "FROM medicamento WHERE idusuario = ? AND costototal > 0 " +
+                        "GROUP BY codigogenerico ORDER BY valor_familia DESC",
                         idSede);
 
-                java.util.List<Object[]> batchArgs = new java.util.ArrayList<>();
+                java.util.List<Object[]> batchUpdateArgs = new java.util.ArrayList<>();
                 double runningSum = 0;
                 java.time.LocalDateTime ahora = java.time.LocalDateTime.now();
 
-                for (Map<String, Object> m : meds) {
-                    Integer id = (Integer) m.get("id");
-                    Double value = ((Number) m.get("costototal")).doubleValue();
-                    runningSum += value;
+                int famA = 0, famB = 0, famC = 0;
+
+                for (Map<String, Object> f : families) {
+                    String codGen = (String) f.get("codigogenerico");
+                    Double famValue = ((Number) f.get("valor_familia")).doubleValue();
+                    runningSum += famValue;
 
                     double percent = (runningSum / totalValueSede) * 100.0;
                     String finalTipo = "C";
                     if (percent <= threshA) {
                         finalTipo = "A";
-                        totalA++;
+                        famA++;
                     } else if (percent <= threshB) {
                         finalTipo = "B";
-                        totalB++;
+                        famB++;
                     } else {
                         finalTipo = "C";
-                        totalC++;
+                        famC++;
                     }
-                    batchArgs.add(new Object[] { finalTipo, ahora, id });
+                    
+                    // Todos los medicamentos de esta familia en esta sede heredan la clasificación
+                    batchUpdateArgs.add(new Object[] { finalTipo, ahora, idSede, codGen });
                 }
 
-                // Ejecutar actualización en lote para la sede
-                if (!batchArgs.isEmpty()) {
+                // Ejecutar actualización en lote para la sede (por familia)
+                if (!batchUpdateArgs.isEmpty()) {
                     jdbcTemplate.batchUpdate(
-                            "UPDATE medicamento SET tipomolecula = ?, fecha_clasificacion = ? WHERE id = ?", batchArgs);
+                            "UPDATE medicamento SET tipomolecula = ?, fecha_clasificacion = ? " +
+                            "WHERE idusuario = ? AND codigogenerico = ?", batchUpdateArgs);
                 }
 
+                // Limpieza para registros sin costo o sin código genérico (aunque el trigger de import ya lo asegura)
                 jdbcTemplate.update(
-                        "UPDATE medicamento SET tipomolecula = 'C' WHERE idusuario = ? AND (costototal <= 0 OR costototal IS NULL)",
+                        "UPDATE medicamento SET tipomolecula = 'C' WHERE idusuario = ? AND (costototal <= 0 OR costototal IS NULL OR codigogenerico IS NULL)",
                         idSede);
-                sedeLog.append("- Sede ").append(idSede).append(": Valor Total $")
-                        .append(String.format("%.2f", totalValueSede)).append("\n");
+
+                totalA += famA;
+                totalB += famB;
+                totalC += famC;
+
+                sedeLog.append("- Sede ").append(idSede).append(": Valor $")
+                        .append(String.format("%.2f", totalValueSede))
+                        .append(" | Familias A:").append(famA)
+                        .append(", B:").append(famB)
+                        .append(", C:").append(famC).append("\n");
             }
 
             log.setCountA(totalA);
             log.setCountB(totalB);
+            log.setCountC(totalC);
             Integer extraC = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM medicamento WHERE costototal <= 0", Integer.class);
             log.setCountC(totalC + (extraC != null ? extraC : 0));
             log.setRegistrosProcesados(sedes.size()); // Guardamos número de sedes procesadas
@@ -534,6 +594,28 @@ public class MedicamentoService {
                     m.setEstadoDelConteo(rs.getString("estadodelconteo"));
                     return m;
                 }, pattern, pattern, limit);
+    }
+
+    public List<Medicamento> searchMedicamentosBySede(String term, String sede, int limit) {
+        if (term == null || term.trim().isEmpty())
+            return new ArrayList<>();
+        String pattern = "%" + term.toLowerCase() + "%";
+        return jdbcTemplate.query(
+                "SELECT m.* FROM medicamento m JOIN usuario u ON m.idusuario = u.id " +
+                "WHERE (LOWER(m.descripcion) LIKE ? OR LOWER(m.plu) LIKE ?) AND u.sede = ? LIMIT ?",
+                (rs, rowNum) -> {
+                    Medicamento m = new Medicamento();
+                    m.setId(rs.getInt("id"));
+                    m.setPlu(rs.getString("plu"));
+                    m.setDescripcion(rs.getString("descripcion"));
+                    m.setIdUsuario(rs.getInt("idusuario"));
+                    m.setInventario(rs.getInt("inventario"));
+                    m.setCosto(rs.getDouble("costo"));
+                    m.setCostoTotal(rs.getDouble("costototal"));
+                    m.setTipomolecula(rs.getString("tipomolecula"));
+                    m.setEstadoDelConteo(rs.getString("estadodelconteo"));
+                    return m;
+                }, pattern, pattern, sede, limit);
     }
 
     public Map<String, Object> getGlobalStats() {

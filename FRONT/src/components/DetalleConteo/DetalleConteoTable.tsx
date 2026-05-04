@@ -57,7 +57,7 @@ const DetalleConteoTable: React.FC = () => {
 
             const now = new Date();
             const fechaHoy = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
-            
+
             const [allMedsForLookup, rawDetalles, rawPersonalizados, stats] = await Promise.all([
                 getAllMedicamentos(currentUser.id),
                 getAllDetalles(currentUser.id, fechaHoy),
@@ -123,7 +123,7 @@ const DetalleConteoTable: React.FC = () => {
             if (isFirstLoadOfToday || allCyclicCompleted) {
                 const { generateABCBlock } = await import('../../utils/cycleGenerator');
                 const generatedMeds = await generateABCBlock(currentUser, fechaHoy);
-                
+
                 if (generatedMeds.length > 0) {
                     const updatedRaw = await getAllDetalles(currentUser.id, fechaHoy);
                     hoyUserDetalles = updatedRaw.filter(d => normalizeDate(d.fechaRegistro) === fechaHoy);
@@ -139,7 +139,7 @@ const DetalleConteoTable: React.FC = () => {
             Swal.close();
 
         } catch (error) {
-            console.error(error);
+            // Silently fail in production
         } finally {
             setLoading(false);
             fetchingRef.current = false;
@@ -169,8 +169,8 @@ const DetalleConteoTable: React.FC = () => {
 
     const handleAddBatchRow = (parent: DetalleConteoEditable) => {
         // Contar cuántos lotes hay ya para este medicamento en la lista actual
-        const currentBatchesCount = detalles.filter(d => 
-            d.idMedicamento === parent.idMedicamento && 
+        const currentBatchesCount = detalles.filter(d =>
+            d.idMedicamento === parent.idMedicamento &&
             normalizeDate(d.fechaRegistro) === normalizeDate(parent.fechaRegistro)
         ).length;
 
@@ -194,7 +194,7 @@ const DetalleConteoTable: React.FC = () => {
             cantidadContada: null,
             horaRegistro: null
         };
-        
+
         // Insertar justo después del padre o del último lote de este padre
         setDetalles(prev => {
             const index = prev.findIndex(d => d.id === parent.id || (parent.tempId && d.tempId === parent.tempId));
@@ -274,7 +274,7 @@ const DetalleConteoTable: React.FC = () => {
             await bulkUpdateDetalles(allToSave);
 
             await fetchData();
-            
+
             Toast.fire({ icon: 'success', title: '¡Reportes sincronizados!' });
         } catch (error) {
             Swal.fire({ icon: 'error', title: 'Error al Guardar', text: 'No se pudieron enviar los reportes.' });
@@ -312,10 +312,11 @@ const DetalleConteoTable: React.FC = () => {
     const avanceGral = totalMeds > 0 ? Math.round((totalContadas / totalMeds) * 100) : 0;
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4 sm:space-y-6 pb-24">
-            
+        <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 pb-16">
+
             {/* Dashboard de Indicadores */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 group hover:border-orange-200 transition-all">
                     <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic mb-2 block">Asignadas Hoy</span>
                     <div className="flex items-baseline gap-2">
@@ -336,19 +337,6 @@ const DetalleConteoTable: React.FC = () => {
                         <span className="text-4xl font-black text-green-600">{avanceHoy}%</span>
                         <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${avanceHoy}%` }}></div>
-                        </div>
-                    </div>
-                </div>
-                <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 group hover:border-orange-200 transition-all">
-                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic mb-2 block">General</span>
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <span className="text-2xl font-black text-gray-900">{totalContadas}</span>
-                            <span className="text-[9px] font-bold text-gray-400 block uppercase leading-none">Totales</span>
-                        </div>
-                        <div className="text-right">
-                            <span className="text-2xl font-black text-orange-500">{avanceGral}%</span>
-                            <span className="text-[9px] font-bold text-gray-400 block uppercase leading-none">Progreso</span>
                         </div>
                     </div>
                 </div>
@@ -395,7 +383,7 @@ const DetalleConteoTable: React.FC = () => {
                                                 <div className="font-black text-gray-900 text-sm uppercase tracking-tight leading-tight flex items-center gap-2">
                                                     {d.medicamento?.descripcion}
                                                     {!d.isNew && d.cantidadContada === null && (
-                                                        <button 
+                                                        <button
                                                             onClick={() => handleAddBatchRow(d)}
                                                             className="p-1.5 bg-orange-50 text-orange-600 rounded-lg hover:bg-orange-500 hover:text-white transition-all shadow-sm"
                                                             title="Agregar otro lote"
@@ -404,7 +392,7 @@ const DetalleConteoTable: React.FC = () => {
                                                         </button>
                                                     )}
                                                     {d.isNew && (
-                                                        <button 
+                                                        <button
                                                             onClick={() => handleRemoveBatchRow(d.tempId!)}
                                                             className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm"
                                                             title="Eliminar lote adicional"
@@ -440,7 +428,7 @@ const DetalleConteoTable: React.FC = () => {
                                             value={d.inputFechaVencimiento}
                                             onChange={(e) => handleFechaVencimientoChange(d.id || d.tempId!, e.target.value)}
                                             onFocus={(e) => e.target.type = 'date'}
-                                            onBlur={(e) => { if(!e.target.value) e.target.type = 'text' }}
+                                            onBlur={(e) => { if (!e.target.value) e.target.type = 'text' }}
                                             disabled={loading}
                                         />
                                     </td>
@@ -485,40 +473,40 @@ const DetalleConteoTable: React.FC = () => {
                                 </div>
                             </div>
                             <div className="ml-4">
-                                        {d.cantidadContada !== null ? (
-                                            <div className="w-10 h-10 bg-green-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-green-500/20">
-                                                <IconCheck size={20} stroke={3} />
-                                            </div>
-                                        ) : (
-                                            <div className="flex gap-2">
-                                                {!d.isNew && (
-                                                    <button 
-                                                        onClick={() => handleAddBatchRow(d)}
-                                                        className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                                                    >
-                                                        <IconPlus size={20} stroke={3} />
-                                                    </button>
-                                                )}
-                                                {d.isNew && (
-                                                    <button 
-                                                        onClick={() => handleRemoveBatchRow(d.tempId!)}
-                                                        className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
-                                                    >
-                                                        <IconTrash size={20} stroke={3} />
-                                                    </button>
-                                                )}
-                                                <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center">
-                                                    <IconRefresh size={20} className="animate-spin-slow" />
-                                                </div>
-                                            </div>
-                                        )}
+                                {d.cantidadContada !== null ? (
+                                    <div className="w-10 h-10 bg-green-500 text-white rounded-xl flex items-center justify-center shadow-lg shadow-green-500/20">
+                                        <IconCheck size={20} stroke={3} />
                                     </div>
-                                </div>
-                                {d.isNew && (
-                                    <div className="px-2 py-1 bg-orange-500 text-white text-[8px] font-black uppercase rounded-full w-fit mb-2 animate-pulse">
-                                        Nuevo Lote Adicional
+                                ) : (
+                                    <div className="flex gap-2">
+                                        {!d.isNew && (
+                                            <button
+                                                onClick={() => handleAddBatchRow(d)}
+                                                className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                                            >
+                                                <IconPlus size={20} stroke={3} />
+                                            </button>
+                                        )}
+                                        {d.isNew && (
+                                            <button
+                                                onClick={() => handleRemoveBatchRow(d.tempId!)}
+                                                className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                                            >
+                                                <IconTrash size={20} stroke={3} />
+                                            </button>
+                                        )}
+                                        <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center">
+                                            <IconRefresh size={20} className="animate-spin-slow" />
+                                        </div>
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                        {d.isNew && (
+                            <div className="px-2 py-1 bg-orange-500 text-white text-[8px] font-black uppercase rounded-full w-fit mb-2 animate-pulse">
+                                Nuevo Lote Adicional
+                            </div>
+                        )}
 
                         <div className="space-y-4 border-t border-gray-50 pt-4">
                             <div className="grid grid-cols-2 gap-4">
@@ -542,7 +530,7 @@ const DetalleConteoTable: React.FC = () => {
                                         value={d.inputFechaVencimiento}
                                         onChange={(e) => handleFechaVencimientoChange(d.id || d.tempId!, e.target.value)}
                                         onFocus={(e) => e.target.type = 'date'}
-                                        onBlur={(e) => { if(!e.target.value) e.target.type = 'text' }}
+                                        onBlur={(e) => { if (!e.target.value) e.target.type = 'text' }}
                                         disabled={loading}
                                     />
                                 </div>

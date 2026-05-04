@@ -108,7 +108,7 @@ export const getDashboardStats = async (): Promise<any> => {
     return response.data;
 };
 
-export const searchMedicamentos = async (q: String, limit = 50): Promise<Medicamento[]> => {
-    const response = await axios.get(`${API_URL}/search`, { params: { q, limit } });
+export const searchMedicamentos = async (q: string, limit = 50, sede?: string): Promise<Medicamento[]> => {
+    const response = await axios.get(`${API_URL}/search`, { params: { q, limit, sede } });
     return response.data;
 };

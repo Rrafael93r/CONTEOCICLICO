@@ -21,7 +21,5 @@ public class MonthlyResetTask {
         
         // Resetear para el nuevo mes
         jdbcTemplate.execute("UPDATE medicamento SET estado_conteo_mensual = 0, estadodelconteo = 'no'");
-        
-        System.out.println("Reinicio mensual de conteos completado automáticamente.");
     }
 }

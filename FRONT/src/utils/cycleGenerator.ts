@@ -9,7 +9,6 @@ export const generateABCBlock = async (
         const response = await axios.post(`/api/detalle-conteo/generar-bloque/${currentUser.id}?fechaHoy=${fechaHoy}`);
         return response.data;
     } catch (error) {
-        console.error('Error generating block from backend', error);
         return [];
     }
 };
