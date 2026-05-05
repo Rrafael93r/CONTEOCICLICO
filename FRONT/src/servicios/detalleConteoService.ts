@@ -11,6 +11,8 @@ export interface DetalleConteo {
         plu: string;
         descripcion: string;
         estadoDelConteo?: string;
+        tipomolecula?: string;
+        costo?: number;
     };
     usuario?: {
         usuario: string;
