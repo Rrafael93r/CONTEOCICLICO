@@ -11,10 +11,19 @@ const namespace = config.require("namespace");
 
 const repoBack = config.require("repoBack");
 const repoFront = config.require("repoFront");
-const repoPythonBot = config.require("repoPythonBot");
+
+// Production API Configuration
+const apiBaseUrl = config.get("apiBaseUrl") || "https://apiciclico.pharmaser.com.co";
+const apiKey = config.get("apiKey") || "pharmaser_secure_api_key_2026";
 
 const authToken = config.requireSecret("authToken");
 const certificateId = config.requireSecret("certificateId");
+
+// Database and SFTP Secrets (Should be moved to Pulumi secrets)
+const dbUrl = config.get("dbUrl") || "jdbc:mysql://10.0.1.115:3306/conteociclico?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=America/Bogota&zeroDateTimeBehavior=convertToNull&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&useServerPrepStmts=true";
+const dbUser = config.get("dbUser") || "admin";
+const dbPassword = config.getSecret("dbPassword") || pulumi.secret("Adm1n*.2024/");
+const jwtSecret = config.getSecret("jwtSecret") || pulumi.secret("super_secret_production_key_change_me_123456789");
 
 const ad = oci.identity.getAvailabilityDomainOutput({
     compartmentId: compartmentId,
@@ -55,18 +64,16 @@ const backendContainerInstance = new oci.containerengine.ContainerInstance("cont
         environmentVariables: {
             APP_AUTO_IMPORT_ENABLED: "true",
             APP_AUTO_IMPORT_DELETE_AFTER_SUCCESS: "true",
-            // Database Configuration
-            DB_URL: "jdbc:mysql://10.0.1.115:3306/conteociclico?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=America/Bogota&zeroDateTimeBehavior=convertToNull&rewriteBatchedStatements=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&useServerPrepStmts=true",
-            DB_USER: "admin",
-            DB_PASSWORD: "Adm1n*.2024/",
-            API_KEY: "pharmaser_secure_api_key_2026",
-            JWT_SECRET: "super_secret_production_key_change_me_123456789",
-            // SFTP configuration
-            SFTP_HOST: "ftpharmaser.pharmaser.com.co",
-            SFTP_USER: "cporto",
-            SFTP_PASSWORD: "Ph@rm4s3r.",
-            SFTP_PORT: 22,
-            SFTP_REMOTE_PATH: "/medicar/ciclicoinventario"
+            DB_URL: dbUrl,
+            DB_USER: dbUser,
+            DB_PASSWORD: dbPassword,
+            API_KEY: apiKey,
+            JWT_SECRET: jwtSecret,
+            SFTP_HOST: config.get("sftpHost") || "ftpharmaser.pharmaser.com.co",
+            SFTP_USER: config.get("sftpUser") || "cporto",
+            SFTP_PASSWORD: config.getSecret("sftpPassword") || pulumi.secret("Ph@rm4s3r."),
+            SFTP_PORT: config.get("sftpPort") || "22",
+            SFTP_REMOTE_PATH: config.get("sftpRemotePath") || "/medicar/ciclicoinventario"
         },
     }],
 });
@@ -123,6 +130,10 @@ const frontendImage = new docker.Image("conteo_ui-image", {
         context: "../FRONT",
         dockerfile: "../FRONT/Dockerfile",
         platform: "linux/amd64",
+        args: {
+            VITE_API_BASE_URL: apiBaseUrl,
+            VITE_API_KEY: apiKey,
+        },
     },
     imageName: pulumi.interpolate`${region}.ocir.io/${namespace}/${repoFront}:latest`,
     registry: {
@@ -149,8 +160,8 @@ const frontendContainerInstance = new oci.containerengine.ContainerInstance("con
         imageUrl: frontendImage.imageName,
         displayName: "conteo_ui-container",
         environmentVariables: {
-            VITE_API_BASE_URL: "https://apiciclico.pharmaser.com.co",
-            VITE_API_KEY: "pharmaser_secure_api_key_2026",
+            VITE_API_BASE_URL: apiBaseUrl,
+            VITE_API_KEY: apiKey,
         },
     }],
 });
