@@ -1,19 +1,14 @@
-FROM node:22-slim AS builder
-
-RUN corepack enable && corepack prepare pnpm@latest --activate
+FROM oven/bun:1 AS builder
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json bun.lock ./
 
-RUN pnpm install --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 COPY . .
 
-ARG VITE_API_BASE_URL
-ARG VITE_API_KEY
-
-RUN VITE_API_BASE_URL=$VITE_API_BASE_URL VITE_API_KEY=$VITE_API_KEY pnpm run build
+RUN bun run build
 
 FROM nginx:alpine
 

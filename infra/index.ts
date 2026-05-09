@@ -13,8 +13,8 @@ const repoBack = config.require("repoBack");
 const repoFront = config.require("repoFront");
 
 // Production API Configuration
-const apiBaseUrl = config.get("apiBaseUrl") || "https://apiciclico.pharmaser.com.co";
-const apiKey = config.get("apiKey") || "pharmaser_secure_api_key_2026";
+const apiBaseUrl = "https://apiciclico.pharmaser.com.co";
+const apiKey = "pharmaser_secure_api_key_2026";
 
 const authToken = config.requireSecret("authToken");
 const certificateId = config.requireSecret("certificateId");
