@@ -11,7 +11,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/seguimiento")
-@org.springframework.web.bind.annotation.CrossOrigin(origins = "*")
 public class SeguimientoController {
 
     @Autowired

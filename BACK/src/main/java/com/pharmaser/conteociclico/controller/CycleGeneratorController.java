@@ -4,6 +4,7 @@ import com.pharmaser.conteociclico.model.Medicamento;
 import com.pharmaser.conteociclico.service.CycleGeneratorService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -16,6 +17,7 @@ public class CycleGeneratorController {
     @Autowired
     private CycleGeneratorService cycleGeneratorService;
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PostMapping("/generar-bloque/{idUsuario}")
     public ResponseEntity<List<Medicamento>> generarBloqueCiclico(
             @PathVariable Integer idUsuario,

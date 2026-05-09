@@ -4,6 +4,7 @@ import com.pharmaser.conteociclico.model.Personalizado;
 import com.pharmaser.conteociclico.service.PersonalizadoService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.time.LocalDate;
@@ -34,6 +35,7 @@ public class PersonalizadoController {
         return personalizadoService.savePersonalizado(personalizado);
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable @NonNull Integer id) {
         personalizadoService.deletePersonalizado(id);

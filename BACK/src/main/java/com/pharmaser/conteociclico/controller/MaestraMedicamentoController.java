@@ -4,6 +4,9 @@ import com.pharmaser.conteociclico.model.MaestraMedicamento;
 import com.pharmaser.conteociclico.service.MaestraMedicamentoService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
@@ -35,11 +38,13 @@ public class MaestraMedicamentoController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PostMapping
     public MaestraMedicamento create(@RequestBody MaestraMedicamento maestraMedicamento) {
         return service.save(maestraMedicamento);
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PutMapping("/{id}")
     public ResponseEntity<MaestraMedicamento> update(@PathVariable Long id, @RequestBody MaestraMedicamento maestraMedicamento) {
         return service.findById(id)
@@ -50,22 +55,25 @@ public class MaestraMedicamentoController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'API')")
     @PostMapping("/bulk")
     public ResponseEntity<String> bulkCreate(@RequestBody List<MaestraMedicamento> lista) {
         service.bulkUpsert(lista);
         return ResponseEntity.ok("Maestra de medicamentos actualizada exitosamente (" + lista.size() + " registros)");
     }
 
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     @PostMapping("/importar")
     public ResponseEntity<Map<String, Object>> importar(@RequestParam("file") MultipartFile file) {
-        // En un entorno real, obtendríamos el usuario del contexto de seguridad
-        String usuario = "ADMIN"; 
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String usuario = (auth != null && auth.getName() != null) ? auth.getName() : "SISTEMA";
         Map<String, Object> result = service.importarArchivo(file, usuario);
         return ResponseEntity.ok(result);
     }

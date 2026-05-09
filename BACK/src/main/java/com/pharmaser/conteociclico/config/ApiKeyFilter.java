@@ -11,7 +11,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import java.util.Collections;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import java.util.List;
 
 import java.io.IOException;
 
@@ -53,7 +54,11 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         String requestApiKey = request.getHeader("x-api-key");
 
         if (apiKey != null && apiKey.equals(requestApiKey)) {
-            Authentication auth = new UsernamePasswordAuthenticationToken("API_USER", null, Collections.emptyList());
+            // ROLE_API permite pasar @PreAuthorize en endpoints de importación masiva
+            Authentication auth = new UsernamePasswordAuthenticationToken(
+                "API_USER", null,
+                List.of(new SimpleGrantedAuthority("ROLE_API"))
+            );
             SecurityContextHolder.getContext().setAuthentication(auth);
             filterChain.doFilter(request, response);
         } else {

@@ -4,6 +4,7 @@ import com.pharmaser.conteociclico.model.Usuario;
 import com.pharmaser.conteociclico.service.UsuarioService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import org.springframework.lang.NonNull;
@@ -27,16 +28,19 @@ public class UsuarioController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     @PostMapping
     public Usuario create(@RequestBody Usuario usuario) {
         return usuarioService.saveUsuario(usuario);
     }
 
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     @PutMapping("/{id}")
     public Usuario update(@PathVariable @NonNull Integer id, @RequestBody Usuario usuario) {
         return usuarioService.updateUsuario(id, usuario);
     }
 
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable @NonNull Integer id) {
         usuarioService.deleteUsuario(id);

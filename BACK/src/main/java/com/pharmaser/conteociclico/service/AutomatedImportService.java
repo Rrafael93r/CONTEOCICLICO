@@ -90,11 +90,10 @@ public class AutomatedImportService {
     public void processFiles() {
         if (!enabled)
             return;
-        if (isProcessing.get()) {
+        // compareAndSet garantiza atomicidad: evita que dos hilos entren simultáneamente
+        if (!isProcessing.compareAndSet(false, true)) {
             return;
         }
-
-        isProcessing.set(true);
         try {
             File folder = new File(inputPath);
             if (!folder.exists()) {
@@ -198,6 +197,7 @@ public class AutomatedImportService {
                 medicamentoService.importFromExternalData(validItems);
 
                 logEntry.setRegistrosLeidos(rawData.size());
+                logEntry.setRegistrosProcesados(validItems.size());   // ← antes siempre quedaba en 0
                 logEntry.setFechaFin(LocalDateTime.now());
 
                 String detailStr = logDetails.toString();

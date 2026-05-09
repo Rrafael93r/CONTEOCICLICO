@@ -4,6 +4,7 @@ import com.pharmaser.conteociclico.model.DetalleConteo;
 import com.pharmaser.conteociclico.service.DetalleConteoService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.lang.NonNull;
 import java.util.List;
@@ -72,6 +73,7 @@ public class DetalleConteoController {
         return detalleConteoService.saveDetalle(detalle);
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable @org.springframework.lang.NonNull Integer id) {
         detalleConteoService.deleteDetalle(id);

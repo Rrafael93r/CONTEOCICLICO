@@ -40,6 +40,9 @@ public class MedicamentoService {
     @Autowired
     private MaestraMedicamentoService maestraService;
 
+    @Autowired
+    private CostoSedeService costoSedeService;
+
     private static final String LOCK_NAME = "ABC_RECLASSIFICATION";
     private static final int LOCK_TIMEOUT_MINUTES = 15;
     private final String instanciaId = java.util.UUID.randomUUID().toString();
@@ -143,19 +146,27 @@ public class MedicamentoService {
         if (items == null || items.isEmpty())
             return;
 
-        String sql = "INSERT INTO medicamento (plu, idusuario, descripcion, inventario, costo, costototal, tipomolecula, estadodelconteo, fecha_clasificacion, fecha_actualizacion, contado_mes_anterior, codigogenerico) "
-                +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, 'no', ?, ?, 0, ?) " +
+        // Reglas de actualización:
+        // - inventario: siempre se actualiza (el archivo trae la cantidad real del día)
+        // - costo/costototal: solo se actualiza si el archivo trae valor > 0 (preserva costo conocido)
+        // - tipomolecula: NO se toca — la reclasificación ABC lo gestiona; solo INSERTs nuevos arrancan en 'C'
+        // - estadodelconteo: NO se toca — no se resetea si ya fue contado hoy
+        // - codigogenerico: solo se actualiza si el archivo trae uno no vacío
+        String sql = "INSERT INTO medicamento " +
+                "(plu, idusuario, descripcion, inventario, costo, costototal, tipomolecula, estadodelconteo, " +
+                " fecha_clasificacion, fecha_actualizacion, contado_mes_anterior, codigogenerico) " +
+                "VALUES (?, ?, ?, ?, ?, ?, 'C', 'no', ?, ?, 0, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
                 "descripcion = VALUES(descripcion), " +
-                "inventario = VALUES(inventario), costo = VALUES(costo), costototal = VALUES(costototal), tipomolecula = VALUES(tipomolecula), fecha_clasificacion = VALUES(fecha_clasificacion), fecha_actualizacion = VALUES(fecha_actualizacion), codigogenerico = VALUES(codigogenerico)";
+                "inventario = VALUES(inventario), " +
+                "costo = IF(VALUES(costo) > 0, VALUES(costo), costo), " +
+                "costototal = IF(VALUES(costototal) > 0, VALUES(costototal), " +
+                "               COALESCE(inventario, 0) * IF(VALUES(costo) > 0, VALUES(costo), costo)), " +
+                "fecha_actualizacion = VALUES(fecha_actualizacion), " +
+                "codigogenerico = IF(VALUES(codigogenerico) IS NOT NULL AND VALUES(codigogenerico) != '', " +
+                "                   VALUES(codigogenerico), codigogenerico)";
 
         java.time.LocalDateTime ahora = java.time.LocalDateTime.now();
-
-        for (MedicamentoImportDTO item : items) {
-            item.setTipomolecula("C"); // Valor inicial por defecto, Pareto reclasificará
-            item.setFechaClasificacion(ahora);
-        }
 
         int batchSize = 1000;
         for (int i = 0; i < items.size(); i += batchSize) {
@@ -165,19 +176,17 @@ public class MedicamentoService {
                 public void setValues(@org.springframework.lang.NonNull java.sql.PreparedStatement ps, int j)
                         throws java.sql.SQLException {
                     MedicamentoImportDTO item = batch.get(j);
+                    int inv = item.getInventario() != null ? item.getInventario() : 0;
+                    double costo = item.getCosto() != null ? item.getCosto() : 0.0;
                     ps.setString(1, item.getPlu());
                     ps.setInt(2, item.getIdUsuario());
                     ps.setString(3, item.getDescripcion());
-                    ps.setInt(4, item.getInventario() != null ? item.getInventario() : 0);
-                    ps.setDouble(5, item.getCosto() != null ? item.getCosto() : 0.0);
-                    ps.setDouble(6,
-                            (item.getInventario() != null && item.getCosto() != null)
-                                    ? (item.getInventario() * item.getCosto())
-                                    : 0.0);
-                    ps.setString(7, item.getTipomolecula());
-                    ps.setObject(8, item.getFechaClasificacion());
-                    ps.setObject(9, ahora);
-                    ps.setString(10, item.getCodigogenerico());
+                    ps.setInt(4, inv);
+                    ps.setDouble(5, costo);
+                    ps.setDouble(6, inv * costo);
+                    ps.setObject(7, ahora);   // fecha_clasificacion (solo INSERT nuevo)
+                    ps.setObject(8, ahora);   // fecha_actualizacion
+                    ps.setString(9, item.getCodigogenerico());
                 }
 
                 @Override
@@ -186,8 +195,6 @@ public class MedicamentoService {
                 }
             });
         }
-
-        // La reclasificación se delega al proceso orquestador para evitar redundancia
     }
 
     public Map<String, Integer> buildUserSedeMap() {
@@ -213,9 +220,14 @@ public class MedicamentoService {
         int lineNum = 1;
         int crossedCount = 0;
         int originalCount = 0;
+        int costoSedeCount = 0;
+        int costoArchivoCount = 0;
 
-        // Cargar maestra en memoria para este lote
+        // Cargar maestra de descripciones (caché 30 min)
         Map<String, String> masterMap = maestraService.getPluDescriptionMap();
+
+        // Cargar mapa de costos reales por sede (caché 60 min, se invalida al subir costos nuevos)
+        Map<String, Double> costMap = costoSedeService.buildCostMap();
 
         for (Map<String, String> row : rawData) {
             lineNum++;
@@ -264,13 +276,29 @@ public class MedicamentoService {
             try {
                 int inv = (int) Double
                         .parseDouble(inventarioStr.replace(".", "").replace(",", ".").replaceAll("[^0-9.-]", ""));
-                double cost = Double
+                double costArchivo = Double
                         .parseDouble(costoStr.replace(".", "").replace(",", ".").replaceAll("[^0-9.-]", ""));
 
-                if (inv < 0 || cost < 0) {
+                if (inv < 0 || costArchivo < 0) {
                     logBuilder.append("Línea ").append(lineNum).append(": Valores negativos (PLU: ").append(plu)
                             .append("). Saltando.\n");
                     continue;
+                }
+
+                // ENRIQUECIMIENTO DE COSTO: buscar en costos_sede por (centroCosto, plu)
+                // La clave se normaliza a entero para que "001" == "1"
+                double cost = costArchivo;
+                try {
+                    int ccInt = Integer.parseInt(centroCosto.trim().replaceAll("[^0-9]", ""));
+                    Double costoReal = costMap.get(ccInt + "-" + plu);
+                    if (costoReal != null && costoReal > 0) {
+                        cost = costoReal;
+                        costoSedeCount++;
+                    } else {
+                        costoArchivoCount++;
+                    }
+                } catch (Exception ex) {
+                    costoArchivoCount++; // sede no numérica — usar costo del archivo
                 }
 
                 MedicamentoImportDTO dto = new MedicamentoImportDTO();
@@ -304,8 +332,10 @@ public class MedicamentoService {
         }
         
         logBuilder.append("\n--- RESUMEN DE ENRIQUECIMIENTO ---\n");
-        logBuilder.append("Registros con descripción de la MAESTRA: ").append(crossedCount).append("\n");
-        logBuilder.append("Registros con descripción ORIGINAL del archivo: ").append(originalCount).append("\n");
+        logBuilder.append("Descripciones desde MAESTRA:      ").append(crossedCount).append("\n");
+        logBuilder.append("Descripciones desde ARCHIVO:      ").append(originalCount).append("\n");
+        logBuilder.append("Costos desde COSTOS_SEDE (reales): ").append(costoSedeCount).append("\n");
+        logBuilder.append("Costos desde ARCHIVO (fallback):   ").append(costoArchivoCount).append("\n");
         logBuilder.append("----------------------------------\n");
 
         return validItems;
@@ -554,8 +584,8 @@ public class MedicamentoService {
     public List<com.pharmaser.conteociclico.dto.MedicamentoSummaryDTO> getSedesSummary() {
         String sql = "SELECT m.idusuario, u.sede, " +
                 "COUNT(*) as total, " +
-                "SUM(CASE WHEN m.estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contados, " +
-                "SUM(CASE WHEN m.estadodelconteo = 'no' THEN 1 ELSE 0 END) as pendientes " +
+                "SUM(CASE WHEN UPPER(m.estadodelconteo) = 'SÍ' THEN 1 ELSE 0 END) as contados, " +
+                "SUM(CASE WHEN UPPER(m.estadodelconteo) != 'SÍ' THEN 1 ELSE 0 END) as pendientes " +
                 "FROM medicamento m " +
                 "JOIN usuario u ON m.idusuario = u.id " +
                 "GROUP BY m.idusuario, u.sede";
@@ -621,14 +651,13 @@ public class MedicamentoService {
     public Map<String, Object> getGlobalStats() {
         String sql = "SELECT " +
                 "COUNT(*) as total, " +
-                "SUM(CASE WHEN estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contados, " +
+                "SUM(CASE WHEN UPPER(estadodelconteo) = 'SÍ' THEN 1 ELSE 0 END) as contados, " +
                 "SUM(CASE WHEN tipomolecula = 'A' THEN 1 ELSE 0 END) as totalA, " +
-                "SUM(CASE WHEN tipomolecula = 'A' AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosA, " +
+                "SUM(CASE WHEN tipomolecula = 'A' AND UPPER(estadodelconteo) = 'SÍ' THEN 1 ELSE 0 END) as contadosA, " +
                 "SUM(CASE WHEN tipomolecula = 'B' THEN 1 ELSE 0 END) as totalB, " +
-                "SUM(CASE WHEN tipomolecula = 'B' AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosB, " +
+                "SUM(CASE WHEN tipomolecula = 'B' AND UPPER(estadodelconteo) = 'SÍ' THEN 1 ELSE 0 END) as contadosB, " +
                 "SUM(CASE WHEN (tipomolecula = 'C' OR tipomolecula IS NULL) THEN 1 ELSE 0 END) as totalC, " +
-                "SUM(CASE WHEN (tipomolecula = 'C' OR tipomolecula IS NULL) AND estadodelconteo = 'sí' THEN 1 ELSE 0 END) as contadosC "
-                +
+                "SUM(CASE WHEN (tipomolecula = 'C' OR tipomolecula IS NULL) AND UPPER(estadodelconteo) = 'SÍ' THEN 1 ELSE 0 END) as contadosC " +
                 "FROM medicamento";
 
         return jdbcTemplate.queryForMap(sql);

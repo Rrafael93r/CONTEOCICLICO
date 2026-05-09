@@ -28,32 +28,39 @@ axios.interceptors.request.use(
         return Promise.reject(error);
     }
 );
-// Manejo global de errores (opcional, pero útil)
+// Manejo global de errores HTTP
 axios.interceptors.response.use(
     (response) => response,
     async (error) => {
-        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-            
-            // Pausar para que el usuario pueda ver el error
+        const status = error.response?.status;
+
+        if (status === 401) {
+            // Sesión expirada o token inválido → cerrar sesión y redirigir al login
             await Swal.fire({
                 icon: 'warning',
-                title: 'Sesión Finalizada o No Autorizado',
-                text: 'Tu sesión ha expirado o no tienes permisos para realizar esta acción. Serás redirigido al login.',
+                title: 'Sesión Expirada',
+                text: 'Tu sesión ha expirado. Por favor inicia sesión nuevamente.',
                 confirmButtonColor: '#f6952c',
                 background: '#fff',
-                customClass: {
-                    popup: 'rounded-3xl'
-                }
+                customClass: { popup: 'rounded-3xl' }
             });
-
-            // Token expirado o inválido
             localStorage.removeItem('token');
             localStorage.removeItem('user');
-            // Redirigir al login si no estamos ya allí
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
             }
+        } else if (status === 403) {
+            // Autenticado pero sin permisos → NO cerrar sesión, solo notificar
+            await Swal.fire({
+                icon: 'error',
+                title: 'Acceso Denegado',
+                text: 'No tienes permisos para realizar esta acción.',
+                confirmButtonColor: '#f6952c',
+                background: '#fff',
+                customClass: { popup: 'rounded-3xl' }
+            });
         }
+
         return Promise.reject(error);
     }
 );

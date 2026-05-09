@@ -6,4 +6,5 @@ import java.util.Optional;
 
 public interface LogCargaAutomaticaRepository extends JpaRepository<LogCargaAutomatica, Long> {
     Optional<LogCargaAutomatica> findByNombreArchivo(String nombreArchivo);
+    java.util.List<LogCargaAutomatica> findAllByOrderByFechaInicioDesc();
 }

@@ -9,6 +9,7 @@ import Swal from 'sweetalert2';
 import * as XLSX from 'xlsx';
 import axios from '../../servicios/axiosConfig';
 import { importMaestra } from '../../servicios/maestraMedicamentoService';
+import { importCostosSede } from '../../servicios/costosSedeService';
 import {
     IconUsers,
     IconMedicineSyrup,
@@ -27,11 +28,13 @@ import {
     IconCheck,
     IconUpload,
     IconInfoCircle,
-    IconTrash
+    IconTrash,
+    IconServer
 } from '@tabler/icons-react';
+import LogsCargue from './LogsCargue';
 
 const AdminPanel: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'usuarios' | 'asignar' | 'reportes' | 'importar' | 'seguimiento'>('usuarios');
+    const [activeTab, setActiveTab] = useState<'usuarios' | 'asignar' | 'reportes' | 'importar' | 'seguimiento' | 'logs'>('usuarios');
     const [searchTermSeguimiento, setSearchTermSeguimiento] = useState('');
     const [assignSearchTerm, setAssignSearchTerm] = useState('');
     const [reportSearchTerm, setReportSearchTerm] = useState('');
@@ -577,9 +580,11 @@ const AdminPanel: React.FC = () => {
         }
     };
 
-    const downloadTemplate = (type: 'medicamento' | 'inventario' = 'medicamento') => {
+    const downloadTemplate = (type: 'medicamento' | 'inventario' | 'costos' = 'medicamento') => {
         const headers = type === 'medicamento'
             ? [['Centro Costo', 'PLU', 'Descripcion', 'Inventario', 'Ultimo Costo', 'Total']]
+            : type === 'costos' 
+            ? [['Centro Costo', 'PLU', 'Costo Unitario']]
             : [['Centro Costo', 'PLU']];
 
         const worksheet = XLSX.utils.aoa_to_sheet(headers);
@@ -588,6 +593,8 @@ const AdminPanel: React.FC = () => {
 
         const wscols = type === 'medicamento'
             ? [{ wch: 10 }, { wch: 15 }, { wch: 40 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 15 }]
+            : type === 'costos'
+            ? [{ wch: 15 }, { wch: 15 }, { wch: 20 }]
             : [{ wch: 15 }, { wch: 15 }];
         worksheet['!cols'] = wscols;
 
@@ -640,7 +647,7 @@ const AdminPanel: React.FC = () => {
 
                 <div className="w-full md:w-auto overflow-x-auto no-scrollbar">
                     <div className="flex bg-gray-50 p-2 rounded-2xl gap-2 min-w-max">
-                        {(['usuarios', 'seguimiento', 'asignar', 'reportes', 'importar'] as const).map(tab => (
+                        {(['usuarios', 'seguimiento', 'asignar', 'reportes', 'importar', 'logs'] as const).map(tab => (
                             <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
@@ -651,7 +658,8 @@ const AdminPanel: React.FC = () => {
                                 {tab === 'asignar' && <IconCalendarPlus size={18} />}
                                 {tab === 'reportes' && <IconFileSpreadsheet size={18} />}
                                 {tab === 'importar' && <IconDatabaseImport size={18} />}
-                                {tab === 'seguimiento' ? 'SEGUIMIENTO' : tab.toUpperCase()}
+                                {tab === 'logs' && <IconServer size={18} />}
+                                {tab === 'seguimiento' ? 'SEGUIMIENTO' : tab === 'logs' ? 'SINC. SFTP' : tab.toUpperCase()}
                             </button>
                         ))}
                     </div>
@@ -1080,6 +1088,76 @@ const AdminPanel: React.FC = () => {
                                 </div>
                             </div>
 
+                            {/* NUEVA SECCIÓN: COSTOS POR SEDE */}
+                            <div className="bg-emerald-50/50 p-8 rounded-[2.5rem] border-2 border-dashed border-emerald-200 text-center space-y-6">
+                                <div className="w-20 h-20 bg-emerald-500 rounded-[2rem] flex items-center justify-center text-white mx-auto shadow-2xl shadow-emerald-500/20">
+                                    <IconDatabaseImport size={40} />
+                                </div>
+                                <div className="space-y-2">
+                                    <h4 className="text-xl font-black text-gray-900 uppercase">Costos por Sede</h4>
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-relaxed px-10">
+                                        Carga el archivo Excel con los costos unitarios específicos por sede y PLU.
+                                    </p>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+                                    <button
+                                        onClick={() => downloadTemplate('costos')}
+                                        className="px-8 py-4 border-2 border-emerald-200 rounded-2xl text-[10px] font-black uppercase tracking-widest text-emerald-600 hover:border-emerald-500 hover:text-emerald-500 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <IconDownload size={18} /> Descargar Plantilla
+                                    </button>
+                                    <div className="relative">
+                                        <input
+                                            type="file"
+                                            id="costos-upload"
+                                            className="hidden"
+                                            accept=".xlsx, .xls, .csv"
+                                            onChange={async (e) => {
+                                                const file = e.target.files?.[0];
+                                                if (!file) return;
+
+                                                Swal.fire({
+                                                    title: '<span class="text-xl font-black text-gray-900 uppercase italic">Importando Costos</span>',
+                                                    html: `
+                                                        <div class="py-10">
+                                                            <div class="w-20 h-20 border-8 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-6 shadow-2xl shadow-emerald-500/20"></div>
+                                                            <p class="text-gray-500 font-bold uppercase tracking-widest text-xs animate-pulse">Procesando archivo...</p>
+                                                        </div>
+                                                    `,
+                                                    allowOutsideClick: false,
+                                                    showConfirmButton: false
+                                                });
+
+                                                try {
+                                                    const response = await importCostosSede(file);
+                                                    Swal.fire({
+                                                        icon: response.estado === 'EXITOSO' ? 'success' : 'warning',
+                                                        title: 'Importación Completada',
+                                                        text: response.mensaje,
+                                                        confirmButtonColor: '#10b981'
+                                                    });
+                                                } catch (error: any) {
+                                                    Swal.fire({
+                                                        icon: 'error',
+                                                        title: 'Error de Importación',
+                                                        text: error.response?.data?.mensaje || 'No se pudo procesar el archivo.',
+                                                        confirmButtonColor: '#ef4444'
+                                                    });
+                                                } finally {
+                                                    if(e.target) e.target.value = '';
+                                                }
+                                            }}
+                                        />
+                                        <label
+                                            htmlFor="costos-upload"
+                                            className="px-10 py-4 bg-emerald-500 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 cursor-pointer hover:bg-emerald-600 transition-all shadow-xl shadow-emerald-500/10"
+                                        >
+                                            <IconUpload size={18} /> Importar Costos
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 )}
@@ -1280,6 +1358,8 @@ const AdminPanel: React.FC = () => {
                         </div>
                     </div>
                 )}
+                
+                {activeTab === 'logs' && <LogsCargue />}
             </div>
         </div>
     );

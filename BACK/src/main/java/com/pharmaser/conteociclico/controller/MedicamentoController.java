@@ -9,6 +9,7 @@ import com.pharmaser.conteociclico.service.MedicamentoService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.List;
@@ -36,12 +37,14 @@ public class MedicamentoController {
     }
 
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'API')")
     @PostMapping("/bulk")
     public ResponseEntity<String> bulkImport(@RequestBody List<MedicamentoImportDTO> items) {
         medicamentoService.importFromExternalData(items);
         return ResponseEntity.ok("Catálogo actualizado exitosamente");
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'API')")
     @PostMapping("/sync")
     public ResponseEntity<?> syncInventory(@RequestBody List<java.util.Map<String, String>> items) {
         StringBuilder logs = new StringBuilder();
@@ -72,17 +75,20 @@ public class MedicamentoController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PostMapping
     public Medicamento create(@RequestBody Medicamento medicamento) {
         return medicamentoService.saveMedicamento(medicamento);
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PutMapping("/{id}")
     public Medicamento update(@PathVariable int id, @RequestBody Medicamento medicamento) {
         medicamento.setId(id);
         return medicamentoService.saveMedicamento(medicamento);
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PostMapping("/reset-cycle/{idUsuario}")
     public ResponseEntity<String> resetCycle(@PathVariable int idUsuario) {
         medicamentoService.resetStatusByUsuario(idUsuario);
@@ -94,6 +100,7 @@ public class MedicamentoController {
         return cycleGeneratorService.obtenerBloqueDiarioDinamico(idUsuario);
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PostMapping("/admin/bloque-extra/{idUsuario}")
     public ResponseEntity<?> asignarBloqueExtra(@PathVariable int idUsuario) {
         Usuario user = usuarioRepository.findById(idUsuario)
@@ -117,24 +124,28 @@ public class MedicamentoController {
         return ResponseEntity.ok("Bloque extra autorizado con éxito. El usuario recibirá las nuevas moléculas al refrescar su lista.");
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @PostMapping("/reset-cycle/{idUsuario}/{tipo}")
     public ResponseEntity<String> resetCycleByTipo(@PathVariable int idUsuario, @PathVariable String tipo) {
         medicamentoService.resetStatusByUsuarioAndTipo(idUsuario, tipo);
         return ResponseEntity.ok("Ciclo para " + tipo + " reiniciado.");
     }
 
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     @PostMapping("/reset-all-cycles")
     public ResponseEntity<String> resetAllCycles() {
         medicamentoService.resetAllStatus();
         return ResponseEntity.ok("Ciclos de todos los usuarios reiniciados correctamente");
     }
 
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Integer id) {
         medicamentoService.deleteMedicamento(id);
         return ResponseEntity.noContent().build();
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'API')")
     @PostMapping("/reclassify-all")
     public ResponseEntity<String> reclassifyAll() {
         try {

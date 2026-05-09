@@ -114,6 +114,7 @@ public class MaestraMedicamentoService {
         }
     }
 
+    @org.springframework.cache.annotation.Cacheable(value = "maestraPluMap", key = "'all'")
     public Map<String, String> getPluDescriptionMap() {
         return repository.findAll().stream()
                 .filter(m -> m.getPlu() != null && m.getNombre() != null)

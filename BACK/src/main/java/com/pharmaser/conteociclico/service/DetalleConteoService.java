@@ -2,9 +2,12 @@ package com.pharmaser.conteociclico.service;
 
 import com.pharmaser.conteociclico.model.DetalleConteo;
 import com.pharmaser.conteociclico.repository.DetalleConteoRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.lang.NonNull;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,6 +15,8 @@ import java.time.LocalDate;
 
 @Service
 public class DetalleConteoService {
+
+    private static final Logger logger = LoggerFactory.getLogger(DetalleConteoService.class);
 
     @Autowired
     private DetalleConteoRepository detalleConteoRepository;
@@ -85,6 +90,8 @@ public class DetalleConteoService {
     public List<DetalleConteo> saveAllDetalles(List<DetalleConteo> detalles) {
         if (detalles.isEmpty()) return detalles;
 
+        List<String> errores = new ArrayList<>();
+
         for (DetalleConteo item : detalles) {
             try {
                 // Sincronizar con tabla medicamento si hay cantidad contada
@@ -96,7 +103,7 @@ public class DetalleConteoService {
                     // INSERT MANUAL
                     jdbcTemplate.update(
                         "INSERT INTO detalleconteo (idmedicamento, idusuario, cantidadcontada, cantidadactual, fecharegistro, horaregistro, tipoconteo, idpersonalizado, lote, fechavencimiento) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        item.getIdMedicamento(), item.getIdUsuario(), item.getCantidadContada(), item.getCantidadActual(), 
+                        item.getIdMedicamento(), item.getIdUsuario(), item.getCantidadContada(), item.getCantidadActual(),
                         item.getFechaRegistro(), item.getHoraRegistro(), item.getTipoConteo(), item.getIdPersonalizado(),
                         item.getLote(), item.getFechaVencimiento()
                     );
@@ -108,9 +115,19 @@ public class DetalleConteoService {
                     );
                 }
             } catch (Exception e) {
-                // Error handling handled by outer transaction if necessary
+                // Registrar el error pero continuar procesando los demás ítems
+                String msg = "Error guardando detalle conteo idMedicamento=" + item.getIdMedicamento()
+                        + " idUsuario=" + item.getIdUsuario() + ": " + e.getMessage();
+                logger.error(msg, e);
+                errores.add(msg);
             }
         }
+
+        if (!errores.isEmpty()) {
+            logger.warn("saveAllDetalles completado con {} error(es) de {} registros. Ver logs para detalle.",
+                    errores.size(), detalles.size());
+        }
+
         return detalles;
     }
 
