@@ -17,7 +17,7 @@ public class CycleGeneratorController {
     @Autowired
     private CycleGeneratorService cycleGeneratorService;
 
-    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO', 'FARMACIA')")
     @PostMapping("/generar-bloque/{idUsuario}")
     public ResponseEntity<List<Medicamento>> generarBloqueCiclico(
             @PathVariable Integer idUsuario,
