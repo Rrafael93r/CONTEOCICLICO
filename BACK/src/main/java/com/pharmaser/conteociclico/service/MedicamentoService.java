@@ -58,7 +58,13 @@ public class MedicamentoService {
             // Motor sin IF NOT EXISTS o columna ya existente — ignorar
         }
 
-        // ── 2. Índice único (plu, idusuario) — CRÍTICO para ON DUPLICATE KEY UPDATE ──
+        // ── 2. CONSOLIDACIÓN POR SEDE ─────────────────────────────────────────
+        // Si la misma sede tiene N usuarios, el mismo PLU puede existir con
+        // distintos idusuarios. Este paso lo consolida al usuario canónico
+        // (FARMACIA, menor id) antes de crear el índice único.
+        consolidarPlusPorSede();
+
+        // ── 3. Índice único (plu, idusuario) — CRÍTICO para ON DUPLICATE KEY UPDATE ──
         Integer existeUnique = jdbcTemplate.queryForObject(
             "SELECT COUNT(1) FROM information_schema.statistics " +
             "WHERE table_schema = DATABASE() AND table_name = 'medicamento' " +
@@ -100,6 +106,63 @@ public class MedicamentoService {
             "ALTER TABLE detalleconteo ADD INDEX idx_detalle_usr_fecha (idusuario, fecharegistro)");
     }
 
+    /**
+     * Consolida medicamentos para que cada (plu, sede) tenga un único registro
+     * apuntando al usuario canónico (rol FARMACIA = idRol 1, menor id por sede).
+     * Elimina registros redundantes generados cuando una sede tenía N usuarios
+     * y cada importación usaba un idusuario distinto.
+     */
+    private void consolidarPlusPorSede() {
+        try {
+            Integer cruzados = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM (" +
+                "  SELECT m.plu, u.sede " +
+                "  FROM medicamento m JOIN usuario u ON m.idusuario = u.id " +
+                "  WHERE u.sede IS NOT NULL " +
+                "  GROUP BY m.plu, u.sede " +
+                "  HAVING COUNT(DISTINCT m.idusuario) > 1" +
+                ") t",
+                Integer.class);
+
+            if (cruzados == null || cruzados == 0) return;
+
+            logger.warn(">>> CONSOLIDACIÓN SEDE: {} PLUs con múltiples usuarios en la misma sede. Consolidando...", cruzados);
+
+            // Paso A: conservar UN registro por (plu, sede).
+            // Prioridad: el del usuario FARMACIA (idRol=1) con menor id.
+            // Fallback: el de mayor id si la sede no tiene usuario FARMACIA.
+            int eliminados = jdbcTemplate.update(
+                "DELETE m FROM medicamento m " +
+                "JOIN usuario u ON m.idusuario = u.id " +
+                "WHERE m.id NOT IN (" +
+                "  SELECT kept_id FROM (" +
+                "    SELECT COALESCE(" +
+                "      MIN(CASE WHEN u2.idrol = 1 THEN m2.id ELSE NULL END)," +
+                "      MAX(m2.id)" +
+                "    ) AS kept_id " +
+                "    FROM medicamento m2 JOIN usuario u2 ON m2.idusuario = u2.id " +
+                "    WHERE u2.sede IS NOT NULL " +
+                "    GROUP BY m2.plu, u2.sede" +
+                "  ) t" +
+                ")");
+
+            // Paso B: asignar el idusuario canónico FARMACIA al registro sobreviviente.
+            // Solo aplica a sedes que tienen al menos un usuario con idRol=1.
+            jdbcTemplate.update(
+                "UPDATE medicamento m " +
+                "JOIN usuario u ON m.idusuario = u.id " +
+                "JOIN (SELECT sede, MIN(id) AS canonical_id " +
+                "      FROM usuario WHERE idrol = 1 AND sede IS NOT NULL GROUP BY sede) canon " +
+                "  ON u.sede = canon.sede " +
+                "SET m.idusuario = canon.canonical_id " +
+                "WHERE m.idusuario <> canon.canonical_id");
+
+            logger.info(">>> CONSOLIDACIÓN SEDE completada. Registros eliminados: {}. PLUs consolidados al usuario FARMACIA canónico.", eliminados);
+        } catch (Exception e) {
+            logger.error(">>> ERROR en consolidarPlusPorSede: {}", e.getMessage());
+        }
+    }
+
     /** Crea un índice NO único solo si no existe. Errores silenciosos (ya existe = normal). */
     private void executeNonUniqueIndexIfNotExists(String indexName, String alterQuery) {
         try {
@@ -124,18 +187,9 @@ public class MedicamentoService {
 
     @org.springframework.transaction.annotation.Transactional
     public void bulkUpdateInventory(java.util.List<java.util.Map<String, Object>> items) {
-        java.util.List<com.pharmaser.conteociclico.model.Usuario> usuarios = usuarioRepository.findAll();
-        java.util.Map<String, Integer> sedeMap = new java.util.HashMap<>();
-        for (com.pharmaser.conteociclico.model.Usuario u : usuarios) {
-            if (u.getSede() != null) {
-                String s = u.getSede().trim();
-                sedeMap.put(s, u.getId());
-                try {
-                    sedeMap.put(String.valueOf(Integer.parseInt(s)), u.getId());
-                } catch (Exception ignore) {
-                }
-            }
-        }
+        // Usa el mismo mapa canónico que importFromExternalData para garantizar
+        // que ambas operaciones afecten siempre al mismo idusuario por sede.
+        java.util.Map<String, Integer> sedeMap = buildUserSedeMap();
 
         final java.util.List<java.util.Map<String, Object>> validItems = new java.util.ArrayList<>();
         for (java.util.Map<String, Object> item : items) {
@@ -224,21 +278,48 @@ public class MedicamentoService {
         }
     }
 
+    /**
+     * Construye el mapa sede → idUsuario para importaciones.
+     * Usa el usuario FARMACIA (idRol=1) con menor id como representante
+     * canónico de cada sede. Si la sede no tiene usuario FARMACIA, usa el
+     * usuario de menor id de cualquier rol.
+     * Esto garantiza que todas las importaciones asignen el mismo idusuario
+     * para la misma sede, evitando duplicados de negocio en medicamento.
+     */
     public Map<String, Integer> buildUserSedeMap() {
-        java.util.List<com.pharmaser.conteociclico.model.Usuario> usuarios = usuarioRepository.findAll();
-        Map<String, Integer> map = new HashMap<>();
-        for (com.pharmaser.conteociclico.model.Usuario u : usuarios) {
-            if (u.getSede() != null) {
-                String s = u.getSede().trim();
-                map.put(s, u.getId());
-                map.put(s.toUpperCase(), u.getId());
-                try {
-                    map.put(String.valueOf(Integer.parseInt(s)), u.getId());
-                } catch (Exception ignore) {
-                }
+        java.util.List<com.pharmaser.conteociclico.model.Usuario> todos = usuarioRepository.findAll();
+
+        // Primer paso: acumular el menor id de FARMACIA (idRol=1) y el menor id de cualquier rol por sede
+        Map<String, Integer> farmaciaPorSede  = new HashMap<>();
+        Map<String, Integer> fallbackPorSede  = new HashMap<>();
+
+        for (com.pharmaser.conteociclico.model.Usuario u : todos) {
+            if (u.getSede() == null) continue;
+            String s = u.getSede().trim();
+            if (Integer.valueOf(1).equals(u.getIdRol())) {
+                farmaciaPorSede.merge(s, u.getId(), Math::min);
+            } else {
+                fallbackPorSede.merge(s, u.getId(), Math::min);
             }
         }
-        return map;
+
+        // Segundo paso: combinar — FARMACIA tiene prioridad
+        Map<String, Integer> result = new HashMap<>();
+        java.util.Set<String> todasSedes = new java.util.HashSet<>();
+        todasSedes.addAll(farmaciaPorSede.keySet());
+        todasSedes.addAll(fallbackPorSede.keySet());
+
+        for (String s : todasSedes) {
+            Integer canonicalId = farmaciaPorSede.containsKey(s)
+                    ? farmaciaPorSede.get(s)
+                    : fallbackPorSede.get(s);
+            result.put(s, canonicalId);
+            result.put(s.toUpperCase(), canonicalId);
+            try {
+                result.put(String.valueOf(Integer.parseInt(s)), canonicalId);
+            } catch (Exception ignore) {}
+        }
+        return result;
     }
 
     public List<MedicamentoImportDTO> normalizeAndValidate(java.util.List<Map<String, String>> rawData,
@@ -467,7 +548,7 @@ public class MedicamentoService {
         com.pharmaser.conteociclico.model.LogClasificacionAbc log = new com.pharmaser.conteociclico.model.LogClasificacionAbc();
         log.setFechaEjecucion(java.time.LocalDateTime.now());
 
-        java.util.List<Integer> sedes = new java.util.ArrayList<>();
+        java.util.List<String> sedes = new java.util.ArrayList<>();
         try {
             if (!acquireDistributedLock()) {
                 return;
@@ -492,35 +573,44 @@ public class MedicamentoService {
             log.setSnapshotConfig("Modo Porcentual: A<=" + threshA + "%, B<=" + threshB + "%, C> " + threshB + "%");
             log.setVersionReglas(java.util.Objects.hash(threshA, threshB));
 
-            // 3. Obtener todas las sedes con medicamentos
+            // 3. Obtener sedes REALES (via JOIN con usuario).
+            // Una sede puede tener N usuarios; clasificamos el inventario COMPLETO
+            // de la sede como una unidad de Pareto, no por usuario individual.
             sedes = jdbcTemplate.queryForList(
-                    "SELECT DISTINCT idusuario FROM medicamento WHERE idusuario IS NOT NULL", Integer.class);
+                    "SELECT DISTINCT u.sede FROM medicamento m " +
+                    "JOIN usuario u ON m.idusuario = u.id " +
+                    "WHERE u.sede IS NOT NULL",
+                    String.class);
 
             int totalA = 0, totalB = 0, totalC = 0;
             StringBuilder sedeLog = new StringBuilder("Métricas por Sede (Clasificación por Familias):\n");
 
-            for (Integer idSede : sedes) {
-                // Valor Total de la Sede
+            for (String sede : sedes) {
+                // Valor total de la sede: suma de TODOS los usuarios de esa sede
                 Double totalValueSede = jdbcTemplate.queryForObject(
-                        "SELECT COALESCE(SUM(costototal), 0) FROM medicamento WHERE idusuario = ? AND costototal > 0",
-                        Double.class, idSede);
+                        "SELECT COALESCE(SUM(m.costototal), 0) FROM medicamento m " +
+                        "JOIN usuario u ON m.idusuario = u.id " +
+                        "WHERE u.sede = ? AND m.costototal > 0",
+                        Double.class, sede);
 
-                if (totalValueSede <= 0) {
-                    jdbcTemplate.update("UPDATE medicamento SET tipomolecula = 'C' WHERE idusuario = ?", idSede);
+                if (totalValueSede == null || totalValueSede <= 0) {
+                    jdbcTemplate.update(
+                        "UPDATE medicamento SET tipomolecula = 'C' " +
+                        "WHERE idusuario IN (SELECT id FROM usuario WHERE sede = ?)", sede);
                     continue;
                 }
 
-                // Obtener Familias (codigogenerico) ordenadas por su valor total consolidado
+                // Familias de la sede completa, ordenadas por valor consolidado
                 java.util.List<Map<String, Object>> families = jdbcTemplate.queryForList(
-                        "SELECT codigogenerico, SUM(costototal) as valor_familia " +
-                        "FROM medicamento WHERE idusuario = ? AND costototal > 0 " +
-                        "GROUP BY codigogenerico ORDER BY valor_familia DESC",
-                        idSede);
+                        "SELECT m.codigogenerico, SUM(m.costototal) AS valor_familia " +
+                        "FROM medicamento m JOIN usuario u ON m.idusuario = u.id " +
+                        "WHERE u.sede = ? AND m.costototal > 0 " +
+                        "GROUP BY m.codigogenerico ORDER BY valor_familia DESC",
+                        sede);
 
                 java.util.List<Object[]> batchUpdateArgs = new java.util.ArrayList<>();
                 double runningSum = 0;
                 java.time.LocalDateTime ahora = java.time.LocalDateTime.now();
-
                 int famA = 0, famB = 0, famC = 0;
 
                 for (Map<String, Object> f : families) {
@@ -529,39 +619,35 @@ public class MedicamentoService {
                     runningSum += famValue;
 
                     double percent = (runningSum / totalValueSede) * 100.0;
-                    String finalTipo = "C";
-                    if (percent <= threshA) {
-                        finalTipo = "A";
-                        famA++;
-                    } else if (percent <= threshB) {
-                        finalTipo = "B";
-                        famB++;
-                    } else {
-                        finalTipo = "C";
-                        famC++;
-                    }
-                    
-                    // Todos los medicamentos de esta familia en esta sede heredan la clasificación
-                    batchUpdateArgs.add(new Object[] { finalTipo, ahora, idSede, codGen });
+                    String finalTipo;
+                    if (percent <= threshA)      { finalTipo = "A"; famA++; }
+                    else if (percent <= threshB) { finalTipo = "B"; famB++; }
+                    else                         { finalTipo = "C"; famC++; }
+
+                    // Todos los registros de esta familia en esta sede → misma clasificación
+                    batchUpdateArgs.add(new Object[] { finalTipo, ahora, sede, codGen });
                 }
 
-                // Ejecutar actualización en lote para la sede (por familia)
                 if (!batchUpdateArgs.isEmpty()) {
                     jdbcTemplate.batchUpdate(
                             "UPDATE medicamento SET tipomolecula = ?, fecha_clasificacion = ? " +
-                            "WHERE idusuario = ? AND codigogenerico = ?", batchUpdateArgs);
+                            "WHERE idusuario IN (SELECT id FROM usuario WHERE sede = ?) " +
+                            "AND codigogenerico = ?",
+                            batchUpdateArgs);
                 }
 
-                // Limpieza para registros sin costo o sin código genérico (aunque el trigger de import ya lo asegura)
+                // Registros sin costo o sin código genérico → C por defecto
                 jdbcTemplate.update(
-                        "UPDATE medicamento SET tipomolecula = 'C' WHERE idusuario = ? AND (costototal <= 0 OR costototal IS NULL OR codigogenerico IS NULL)",
-                        idSede);
+                        "UPDATE medicamento SET tipomolecula = 'C' " +
+                        "WHERE idusuario IN (SELECT id FROM usuario WHERE sede = ?) " +
+                        "AND (costototal <= 0 OR costototal IS NULL OR codigogenerico IS NULL)",
+                        sede);
 
                 totalA += famA;
                 totalB += famB;
                 totalC += famC;
 
-                sedeLog.append("- Sede ").append(idSede).append(": Valor $")
+                sedeLog.append("- Sede ").append(sede).append(": Valor $")
                         .append(String.format("%.2f", totalValueSede))
                         .append(" | Familias A:").append(famA)
                         .append(", B:").append(famB)
@@ -573,7 +659,7 @@ public class MedicamentoService {
             log.setCountC(totalC);
             Integer extraC = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM medicamento WHERE costototal <= 0", Integer.class);
             log.setCountC(totalC + (extraC != null ? extraC : 0));
-            log.setRegistrosProcesados(sedes.size()); // Guardamos número de sedes procesadas
+            log.setRegistrosProcesados(sedes.size());
             log.setEstado("EXITO");
             log.setMensajeError(sedeLog.toString());
 
@@ -625,13 +711,16 @@ public class MedicamentoService {
     }
 
     public List<com.pharmaser.conteociclico.dto.MedicamentoSummaryDTO> getSedesSummary() {
-        String sql = "SELECT m.idusuario, u.sede, " +
-                "COUNT(*) as total, " +
-                "SUM(CASE WHEN UPPER(m.estadodelconteo) = 'SÍ' THEN 1 ELSE 0 END) as contados, " +
-                "SUM(CASE WHEN UPPER(m.estadodelconteo) != 'SÍ' THEN 1 ELSE 0 END) as pendientes " +
+        // Agrupa por SEDE REAL (no por idusuario individual) para que sedes con
+        // múltiples usuarios muestren el consolidado correcto.
+        // MIN(m.idusuario) como representante para compatibilidad con el DTO.
+        String sql = "SELECT MIN(m.idusuario) AS idusuario, u.sede, " +
+                "COUNT(*) AS total, " +
+                "SUM(CASE WHEN UPPER(m.estadodelconteo) = 'SÍ' THEN 1 ELSE 0 END) AS contados, " +
+                "SUM(CASE WHEN UPPER(m.estadodelconteo) != 'SÍ' THEN 1 ELSE 0 END) AS pendientes " +
                 "FROM medicamento m " +
                 "JOIN usuario u ON m.idusuario = u.id " +
-                "GROUP BY m.idusuario, u.sede";
+                "GROUP BY u.sede";
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             com.pharmaser.conteociclico.dto.MedicamentoSummaryDTO dto = new com.pharmaser.conteociclico.dto.MedicamentoSummaryDTO();
@@ -640,10 +729,6 @@ public class MedicamentoService {
             dto.setTotal(rs.getLong("total"));
             dto.setContados(rs.getLong("contados"));
             dto.setPendientes(rs.getLong("pendientes"));
-
-            // Calcular porcentajes de cobertura por categoría para esta sede de forma
-            // rápida
-            // Podríamos hacerlo en el mismo query, pero para legibilidad y flexibilidad:
             return dto;
         });
     }
