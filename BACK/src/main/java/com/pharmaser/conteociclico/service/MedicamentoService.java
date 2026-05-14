@@ -64,6 +64,13 @@ public class MedicamentoService {
         // (FARMACIA, menor id) antes de crear el índice único.
         consolidarPlusPorSede();
 
+        // ── 2b. DEDUPLICAR detalleconteo ──────────────────────────────────────
+        // La consolidación de medicamentos puede haber dejado múltiples filas en
+        // detalleconteo apuntando al mismo idmedicamento para el mismo usuario/fecha.
+        // Este paso elimina esas filas duplicadas conservando la que ya fue contada
+        // (cantidadcontada IS NOT NULL) o la de mayor id si ninguna fue contada.
+        consolidarDetalleConteo();
+
         // ── 3. Índice único (plu, idusuario) — CRÍTICO para ON DUPLICATE KEY UPDATE ──
         Integer existeUnique = jdbcTemplate.queryForObject(
             "SELECT COUNT(1) FROM information_schema.statistics " +
@@ -184,6 +191,50 @@ public class MedicamentoService {
             logger.info(">>> CONSOLIDACION SEDE completada. Registros eliminados: {}. PLUs consolidados al usuario FARMACIA canonico.", eliminados);
         } catch (Exception e) {
             logger.error(">>> ERROR en consolidarPlusPorSede: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Elimina filas duplicadas en detalleconteo que apuntan al mismo
+     * (idmedicamento, idusuario, fecharegistro, tipoconteo).
+     * Esto ocurre cuando la consolidación de medicamentos por sede redirige
+     * múltiples referencias al mismo idmedicamento sobreviviente.
+     * Conserva la fila ya contada (cantidadcontada IS NOT NULL),
+     * o la de mayor id si ninguna fue contada aún.
+     */
+    private void consolidarDetalleConteo() {
+        try {
+            Integer dupDc = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM (" +
+                "  SELECT idmedicamento, idusuario, fecharegistro, tipoconteo " +
+                "  FROM detalleconteo " +
+                "  WHERE idmedicamento IS NOT NULL " +
+                "  GROUP BY idmedicamento, idusuario, fecharegistro, tipoconteo " +
+                "  HAVING COUNT(*) > 1" +
+                ") t",
+                Integer.class);
+
+            if (dupDc == null || dupDc == 0) return;
+
+            logger.warn(">>> CONSOLIDACION DETALLE: {} grupos duplicados en detalleconteo. Limpiando...", dupDc);
+
+            int eliminados = jdbcTemplate.update(
+                "DELETE FROM detalleconteo " +
+                "WHERE id NOT IN (" +
+                "  SELECT keeper FROM (" +
+                "    SELECT COALESCE(" +
+                "      MIN(CASE WHEN cantidadcontada IS NOT NULL THEN id ELSE NULL END)," +
+                "      MAX(id)" +
+                "    ) AS keeper " +
+                "    FROM detalleconteo " +
+                "    WHERE idmedicamento IS NOT NULL " +
+                "    GROUP BY idmedicamento, idusuario, fecharegistro, tipoconteo" +
+                "  ) t" +
+                ")");
+
+            logger.info(">>> CONSOLIDACION DETALLE completada. Filas duplicadas eliminadas: {}", eliminados);
+        } catch (Exception e) {
+            logger.error(">>> ERROR en consolidarDetalleConteo: {}", e.getMessage());
         }
     }
 

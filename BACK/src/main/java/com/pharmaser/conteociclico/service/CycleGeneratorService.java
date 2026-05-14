@@ -232,15 +232,21 @@ public class CycleGeneratorService {
         
         if (codigosGen.isEmpty()) return new ArrayList<>();
 
-        // 2. Traer todos los medicamentos que pertenecen a esas familias en esa sede
-        // Usamos JPA para mantener la coherencia de objetos
+        // 2. Traer todos los medicamentos que pertenecen a esas familias en esa sede.
+        // Se deduplica por PLU para garantizar que un medicamento nunca aparezca
+        // dos veces en el bloque aunque queden registros residuales en la BD.
         List<Usuario> usuariosSede = usuarioRepository.findBySede(sede);
         List<Integer> userIds = usuariosSede.stream().map(Usuario::getId).collect(Collectors.toList());
 
-        return medicamentoRepository.findAll().stream()
+        // LinkedHashMap por PLU: si hay dos registros con el mismo PLU, gana el de menor id
+        java.util.LinkedHashMap<String, Medicamento> porPlu = new java.util.LinkedHashMap<>();
+        medicamentoRepository.findAll().stream()
                 .filter(m -> userIds.contains(m.getIdUsuario()))
                 .filter(m -> codigosGen.contains(m.getCodigogenerico()))
-                .collect(Collectors.toList());
+                .sorted(Comparator.comparing(Medicamento::getId))
+                .forEach(m -> porPlu.putIfAbsent(m.getPlu(), m));
+
+        return new ArrayList<>(porPlu.values());
     }
 
     public boolean isDailyBlockFinished(Integer idUsuario) {
