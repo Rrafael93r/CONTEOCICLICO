@@ -109,8 +109,15 @@ public class MedicamentoService {
     /**
      * Consolida medicamentos para que cada (plu, sede) tenga un único registro
      * apuntando al usuario canónico (rol FARMACIA = idRol 1, menor id por sede).
-     * Elimina registros redundantes generados cuando una sede tenía N usuarios
-     * y cada importación usaba un idusuario distinto.
+     *
+     * Problema original: una sede con N usuarios (FARMACIA, CONTROL, ADMIN) generaba
+     * que el mismo PLU se importara con distintos idusuarios para la misma sede,
+     * causando duplicados de negocio que el índice único (plu, idusuario) no detectaba.
+     *
+     * Estrategia de 3 pasos para manejar la FK de detalleconteo:
+     *   A) Redirigir detalleconteo al registro sobreviviente → libera la FK
+     *   B) Borrar los registros redundantes (ya sin referencias FK)
+     *   C) Asignar el idusuario canónico FARMACIA al sobreviviente
      */
     private void consolidarPlusPorSede() {
         try {
@@ -126,11 +133,28 @@ public class MedicamentoService {
 
             if (cruzados == null || cruzados == 0) return;
 
-            logger.warn(">>> CONSOLIDACIÓN SEDE: {} PLUs con múltiples usuarios en la misma sede. Consolidando...", cruzados);
+            logger.warn(">>> CONSOLIDACION SEDE: {} PLUs con multiples usuarios en la misma sede. Consolidando...", cruzados);
 
-            // Paso A: conservar UN registro por (plu, sede).
-            // Prioridad: el del usuario FARMACIA (idRol=1) con menor id.
-            // Fallback: el de mayor id si la sede no tiene usuario FARMACIA.
+            // ── Paso A: Redirigir detalleconteo al registro sobreviviente ──────
+            // El sobreviviente es: usuario FARMACIA (idRol=1) con menor id,
+            // o MAX(id) si la sede no tiene usuario FARMACIA.
+            // detalleconteo no tiene unique constraint en idmedicamento → operación segura.
+            jdbcTemplate.update(
+                "UPDATE detalleconteo dc " +
+                "JOIN medicamento m ON dc.idmedicamento = m.id " +
+                "JOIN usuario u ON m.idusuario = u.id " +
+                "JOIN (" +
+                "  SELECT m2.plu, u2.sede, " +
+                "    COALESCE(MIN(CASE WHEN u2.idrol = 1 THEN m2.id ELSE NULL END), MAX(m2.id)) AS survivor_id " +
+                "  FROM medicamento m2 JOIN usuario u2 ON m2.idusuario = u2.id " +
+                "  WHERE u2.sede IS NOT NULL " +
+                "  GROUP BY m2.plu, u2.sede" +
+                ") surv ON u.sede = surv.sede AND m.plu = surv.plu " +
+                "SET dc.idmedicamento = surv.survivor_id " +
+                "WHERE dc.idmedicamento <> surv.survivor_id");
+
+            // ── Paso B: Borrar los registros redundantes ──────────────────────
+            // En este punto ningún detalleconteo los referencia → FK no falla.
             int eliminados = jdbcTemplate.update(
                 "DELETE m FROM medicamento m " +
                 "JOIN usuario u ON m.idusuario = u.id " +
@@ -146,8 +170,8 @@ public class MedicamentoService {
                 "  ) t" +
                 ")");
 
-            // Paso B: asignar el idusuario canónico FARMACIA al registro sobreviviente.
-            // Solo aplica a sedes que tienen al menos un usuario con idRol=1.
+            // ── Paso C: Asignar idusuario canónico FARMACIA al sobreviviente ──
+            // Solo aplica a sedes con al menos un usuario de idRol=1.
             jdbcTemplate.update(
                 "UPDATE medicamento m " +
                 "JOIN usuario u ON m.idusuario = u.id " +
@@ -157,7 +181,7 @@ public class MedicamentoService {
                 "SET m.idusuario = canon.canonical_id " +
                 "WHERE m.idusuario <> canon.canonical_id");
 
-            logger.info(">>> CONSOLIDACIÓN SEDE completada. Registros eliminados: {}. PLUs consolidados al usuario FARMACIA canónico.", eliminados);
+            logger.info(">>> CONSOLIDACION SEDE completada. Registros eliminados: {}. PLUs consolidados al usuario FARMACIA canonico.", eliminados);
         } catch (Exception e) {
             logger.error(">>> ERROR en consolidarPlusPorSede: {}", e.getMessage());
         }
