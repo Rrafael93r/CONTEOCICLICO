@@ -95,6 +95,18 @@ public class AutomatedImportService {
             return;
         }
         try {
+            doProcessLocalFiles();
+        } finally {
+            isProcessing.set(false);
+        }
+    }
+
+    /**
+     * Lógica interna de procesamiento de archivos locales.
+     * Solo se llama desde métodos que ya adquirieron el lock isProcessing.
+     */
+    private void doProcessLocalFiles() {
+        try {
             File folder = new File(inputPath);
             if (!folder.exists()) {
                 folder.mkdirs();
@@ -102,7 +114,7 @@ public class AutomatedImportService {
 
             File[] files = folder.listFiles((dir, name) -> name.toLowerCase().endsWith(".csv")
                     || name.toLowerCase().endsWith(".xlsx") || name.toLowerCase().endsWith(".xls"));
-            
+
             if (files == null || files.length == 0)
                 return;
 
@@ -116,7 +128,7 @@ public class AutomatedImportService {
                 if (hash == null) continue;
 
                 if (idempotenciaRepository.existsById(hash)) {
-                    logger.info("Archivo {} ya procesado anteriormente (Hash duplicado). Moviedo a procesados.", file.getName());
+                    logger.info("Archivo {} ya procesado anteriormente (Hash duplicado). Moviendo a procesados.", file.getName());
                     try {
                         moveFile(file, true);
                     } catch (IOException e) {
@@ -137,8 +149,6 @@ public class AutomatedImportService {
 
         } catch (Exception e) {
             logger.error("Error crítico en proceso de archivos: {}", e.getMessage());
-        } finally {
-            isProcessing.set(false);
         }
     }
 
@@ -339,10 +349,22 @@ public class AutomatedImportService {
     public void scheduledBotSync() {
         if (!enabled)
             return;
-        logger.info("Iniciando sincronización programada desde SFTP...");
-        downloadFilesFromSftp();
-        processFiles();
-        logger.info("Sincronización técnica completada.");
+        // Guard al nivel del ciclo SFTP completo: descarga + procesamiento son una sola
+        // unidad atómica. Si el scheduler y onApplicationReady disparan casi al mismo
+        // tiempo, el segundo hilo ve isProcessing=true y desiste ANTES de conectarse
+        // al SFTP, evitando la doble descarga y el "No such file" al borrar.
+        if (!isProcessing.compareAndSet(false, true)) {
+            logger.info("Sincronización SFTP ya en progreso (otro hilo activo). Saltando esta ejecución.");
+            return;
+        }
+        try {
+            logger.info("Iniciando sincronización programada desde SFTP...");
+            downloadFilesFromSftp();
+            doProcessLocalFiles();
+            logger.info("Sincronización técnica completada.");
+        } finally {
+            isProcessing.set(false);
+        }
     }
 
     private void downloadFilesFromSftp() {
