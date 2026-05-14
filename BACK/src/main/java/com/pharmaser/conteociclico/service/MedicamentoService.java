@@ -49,41 +49,68 @@ public class MedicamentoService {
 
     @PostConstruct
     public void initIndexes() {
+
+        // ── 1. Columna codigogenerico (si no existe) ──────────────────────────
         try {
-            // Indice PLU/Usuario (Unico)
-            executeIndexIfNotExists("idx_plu_usuario",
-                    "ALTER TABLE medicamento ADD UNIQUE INDEX idx_plu_usuario (plu, idusuario)");
-
-            // Indice Compuesto para ABC y Consultas (idusuario, costototal DESC)
-            executeIndexIfNotExists("idx_abc_consulta",
-                    "ALTER TABLE medicamento ADD INDEX idx_abc_consulta (idusuario, costototal DESC)");
-
-            // Indice para Detalle Conteo
-            executeIndexIfNotExists("idx_detalle_usr_fecha",
-                    "ALTER TABLE detalleconteo ADD INDEX idx_detalle_usr_fecha (idusuario, fecharegistro)");
-
-            // Columna Codigo Generico
-            try {
-                jdbcTemplate.execute("ALTER TABLE medicamento ADD COLUMN IF NOT EXISTS codigogenerico VARCHAR(255)");
-            } catch (Exception e) {
-                // Fallback para motores que no soportan IF NOT EXISTS o si ya existe
-            }
+            jdbcTemplate.execute(
+                "ALTER TABLE medicamento ADD COLUMN IF NOT EXISTS codigogenerico VARCHAR(255)");
         } catch (Exception e) {
-            logger.error("Error inicializando índices: {}", e.getMessage());
+            // Motor sin IF NOT EXISTS o columna ya existente — ignorar
         }
+
+        // ── 2. Índice único (plu, idusuario) — CRÍTICO para ON DUPLICATE KEY UPDATE ──
+        Integer existeUnique = jdbcTemplate.queryForObject(
+            "SELECT COUNT(1) FROM information_schema.statistics " +
+            "WHERE table_schema = DATABASE() AND table_name = 'medicamento' " +
+            "AND index_name = 'idx_plu_usuario'",
+            Integer.class);
+
+        if (existeUnique == null || existeUnique == 0) {
+            // Antes de crear el índice único, eliminar duplicados existentes.
+            // Conservamos el registro con mayor id (última importación) por cada (plu, idusuario).
+            Integer duplicados = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM medicamento WHERE id NOT IN " +
+                "(SELECT max_id FROM (SELECT MAX(id) AS max_id FROM medicamento GROUP BY plu, idusuario) t)",
+                Integer.class);
+
+            if (duplicados != null && duplicados > 0) {
+                logger.warn(">>> DEDUPLICACIÓN: Se encontraron {} registros duplicados en medicamento. Eliminando...", duplicados);
+                jdbcTemplate.update(
+                    "DELETE FROM medicamento WHERE id NOT IN " +
+                    "(SELECT max_id FROM (SELECT MAX(id) AS max_id FROM medicamento GROUP BY plu, idusuario) t)");
+                logger.info(">>> DEDUPLICACIÓN completada. Registros eliminados: {}", duplicados);
+            }
+
+            // Ahora sí crear el índice único de forma segura
+            try {
+                jdbcTemplate.execute(
+                    "ALTER TABLE medicamento ADD UNIQUE INDEX idx_plu_usuario (plu, idusuario)");
+                logger.info(">>> Índice único idx_plu_usuario creado correctamente.");
+            } catch (Exception e) {
+                logger.error(">>> ERROR creando índice único idx_plu_usuario: {}", e.getMessage());
+            }
+        }
+
+        // ── 3. Índice compuesto ABC ───────────────────────────────────────────
+        executeNonUniqueIndexIfNotExists("idx_abc_consulta",
+            "ALTER TABLE medicamento ADD INDEX idx_abc_consulta (idusuario, costototal DESC)");
+
+        // ── 4. Índice detalle conteo ──────────────────────────────────────────
+        executeNonUniqueIndexIfNotExists("idx_detalle_usr_fecha",
+            "ALTER TABLE detalleconteo ADD INDEX idx_detalle_usr_fecha (idusuario, fecharegistro)");
     }
 
-    private void executeIndexIfNotExists(String indexName, String alterQuery) {
-        if (alterQuery == null) return;
+    /** Crea un índice NO único solo si no existe. Errores silenciosos (ya existe = normal). */
+    private void executeNonUniqueIndexIfNotExists(String indexName, String alterQuery) {
         try {
             Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='medicamento' AND index_name=?",
-                    Integer.class, indexName);
-
+                "SELECT COUNT(1) FROM information_schema.statistics " +
+                "WHERE table_schema = DATABASE() AND table_name = 'medicamento' AND index_name = ?",
+                Integer.class, indexName);
             if (count != null && count == 0) {
-                jdbcTemplate.execute(java.util.Objects.requireNonNull(alterQuery));
+                jdbcTemplate.execute(alterQuery);
             }
-        } catch (Exception e) {
+        } catch (Exception ignore) {
         }
     }
 
@@ -216,12 +243,16 @@ public class MedicamentoService {
 
     public List<MedicamentoImportDTO> normalizeAndValidate(java.util.List<Map<String, String>> rawData,
             Map<String, Integer> userSedeMap, StringBuilder logBuilder) {
-        List<MedicamentoImportDTO> validItems = new ArrayList<>();
+        // LinkedHashMap keyed by "plu|idusuario" — si el mismo PLU+sede aparece varias veces
+        // en el archivo, la última ocurrencia gana (más reciente en el lote).
+        // Esto garantiza que el batch enviado a importFromExternalData no tenga duplicados.
+        java.util.LinkedHashMap<String, MedicamentoImportDTO> uniqueMap = new java.util.LinkedHashMap<>();
         int lineNum = 1;
         int crossedCount = 0;
         int originalCount = 0;
         int costoSedeCount = 0;
         int costoArchivoCount = 0;
+        int intraFileDuplicates = 0;
 
         // Cargar maestra de descripciones (caché 30 min)
         Map<String, String> masterMap = maestraService.getPluDescriptionMap();
@@ -324,18 +355,30 @@ public class MedicamentoService {
                 }
                 dto.setCodigogenerico(codGen);
 
-                validItems.add(dto);
+                // Deduplicación intra-archivo: si ya existe este (plu, sede) en el mapa,
+                // la nueva entrada lo sobreescribe (última línea del archivo prevalece).
+                String dedupeKey = plu + "|" + idUsuario;
+                if (uniqueMap.containsKey(dedupeKey)) {
+                    intraFileDuplicates++;
+                }
+                uniqueMap.put(dedupeKey, dto);
+
             } catch (Exception e) {
                 logBuilder.append("Línea ").append(lineNum).append(": Error numérico en PLU ").append(plu)
                         .append(". Saltando.\n");
             }
         }
-        
+
+        List<MedicamentoImportDTO> validItems = new ArrayList<>(uniqueMap.values());
+
         logBuilder.append("\n--- RESUMEN DE ENRIQUECIMIENTO ---\n");
-        logBuilder.append("Descripciones desde MAESTRA:      ").append(crossedCount).append("\n");
-        logBuilder.append("Descripciones desde ARCHIVO:      ").append(originalCount).append("\n");
+        logBuilder.append("Descripciones desde MAESTRA:       ").append(crossedCount).append("\n");
+        logBuilder.append("Descripciones desde ARCHIVO:       ").append(originalCount).append("\n");
         logBuilder.append("Costos desde COSTOS_SEDE (reales): ").append(costoSedeCount).append("\n");
         logBuilder.append("Costos desde ARCHIVO (fallback):   ").append(costoArchivoCount).append("\n");
+        if (intraFileDuplicates > 0) {
+            logBuilder.append("Duplicados en el archivo (omitidos): ").append(intraFileDuplicates).append("\n");
+        }
         logBuilder.append("----------------------------------\n");
 
         return validItems;

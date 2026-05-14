@@ -4,7 +4,13 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 @Entity
-@Table(name = "medicamento")
+@Table(
+    name = "medicamento",
+    uniqueConstraints = @UniqueConstraint(
+        name = "uk_medicamento_plu_usuario",
+        columnNames = {"plu", "idusuario"}
+    )
+)
 @Data
 @com.fasterxml.jackson.annotation.JsonIgnoreProperties({ "hibernateLazyInitializer", "handler" })
 public class Medicamento {
