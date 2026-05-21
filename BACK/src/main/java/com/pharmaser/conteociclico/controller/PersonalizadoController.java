@@ -17,19 +17,21 @@ public class PersonalizadoController {
     @Autowired
     private PersonalizadoService personalizadoService;
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO', 'FARMACIA')")
     @GetMapping
     public List<Personalizado> getAll(@RequestParam(required = false) Integer idUsuario,
                                      @RequestParam(required = false) String fechaProgramacion) {
-        
+
         LocalDate date = (fechaProgramacion != null) ? java.time.LocalDate.parse(fechaProgramacion) : java.time.LocalDate.now();
-        
+
         if (idUsuario != null) {
             return personalizadoService.getPersonalizadosByUsuarioYFechaProgramacion(idUsuario, date);
         }
-        
+
         return personalizadoService.getPersonalizadosByFechaProgramacion(date);
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO', 'FARMACIA')")
     @PostMapping
     public Personalizado create(@RequestBody @NonNull Personalizado personalizado) {
         return personalizadoService.savePersonalizado(personalizado);

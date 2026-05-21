@@ -2,15 +2,11 @@ package com.pharmaser.conteociclico.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+// Note: Usuario ManyToOne relation removed — medicamento now belongs to a sede (String code),
+// not to an individual user. Use JOIN usuario u ON u.sede = m.sede for user lookups.
 
 @Entity
-@Table(
-    name = "medicamento",
-    uniqueConstraints = @UniqueConstraint(
-        name = "uk_medicamento_plu_usuario",
-        columnNames = {"plu", "idusuario"}
-    )
-)
+@Table(name = "medicamento")
 @Data
 @com.fasterxml.jackson.annotation.JsonIgnoreProperties({ "hibernateLazyInitializer", "handler" })
 public class Medicamento {
@@ -25,13 +21,11 @@ public class Medicamento {
     @Column(name = "descripcion", columnDefinition = "TEXT")
     private String descripcion;
 
-    @Column(name = "idusuario")
-    private Integer idUsuario;
-
-    @com.fasterxml.jackson.annotation.JsonIgnore
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "idusuario", insertable = false, updatable = false)
-    private Usuario usuario;
+    /** Código de sede al que pertenece el medicamento (ej. "037", "003").
+     *  Reemplaza el antiguo idusuario que apuntaba al usuario canónico FARMACIA.
+     *  Un medicamento pertenece a la SEDE, no a un usuario individual. */
+    @Column(name = "sede")
+    private String sede;
 
     @Column(name = "estado_conteo_mensual")
     private Integer estadoConteoMensual = 0; // 0: No contado, 1: Primer conteo, 2: Segundo conteo (Solo Tipo A)

@@ -13,14 +13,26 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.pharmaser.conteociclico.model.SedeConfig;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 @Service
 public class CycleGeneratorService {
+
+    /**
+     * Lock por sede: evita que dos hilos simultáneos generen el bloque del día para
+     * la misma sede a la vez (race condition check-then-insert).
+     * Es un lock en memoria: suficiente para despliegue de instancia única.
+     */
+    private final ConcurrentHashMap<String, ReentrantLock> sedeLocks = new ConcurrentHashMap<>();
+
+    private ReentrantLock getLockParaSede(String sede) {
+        return sedeLocks.computeIfAbsent(sede, k -> new ReentrantLock());
+    }
 
     @Autowired
     private MedicamentoRepository medicamentoRepository;
@@ -88,79 +100,87 @@ public class CycleGeneratorService {
         }
 
         // 3. CONTROL DE FLUJO POR SEDE: ¿Ya se generó el bloque para la sede hoy?
-        List<DetalleConteo> detallesSedeHoy = detalleConteoRepository.findBySedeAndFecha(sede, fechaHoy);
+        // Se usa un lock por sede para evitar race condition check-then-insert cuando
+        // dos usuarios de la misma sede solicitan su bloque casi al mismo tiempo.
+        ReentrantLock lock = getLockParaSede(sede);
+        lock.lock();
+        try {
+            List<DetalleConteo> detallesSedeHoy = detalleConteoRepository.findBySedeAndFecha(sede, fechaHoy);
 
-        boolean yaEmpezoDiarioSede = detallesSedeHoy.stream().anyMatch(d -> "Cíclico".equals(d.getTipoConteo()));
-        boolean yaHizoExtraSede = detallesSedeHoy.stream().anyMatch(d -> "Cíclico Adicional".equals(d.getTipoConteo()));
+            boolean yaEmpezoDiarioSede = detallesSedeHoy.stream().anyMatch(d -> "Cíclico".equals(d.getTipoConteo()));
+            boolean yaHizoExtraSede = detallesSedeHoy.stream().anyMatch(d -> "Cíclico Adicional".equals(d.getTipoConteo()));
 
-        boolean permisoExtraActivo = usuario.getFechaBloqueExtra() != null
-                && usuario.getFechaBloqueExtra().equals(fechaHoy);
+            boolean permisoExtraActivo = usuario.getFechaBloqueExtra() != null
+                    && usuario.getFechaBloqueExtra().equals(fechaHoy);
 
-        String tipoAAsignar = null;
+            String tipoAAsignar;
 
-        if (!yaEmpezoDiarioSede) {
-            tipoAAsignar = "Cíclico";
-        } else if (permisoExtraActivo && !yaHizoExtraSede) {
-            tipoAAsignar = "Cíclico Adicional";
-        } else {
-            // Si ya se generó para la sede pero este usuario no tiene nada asignado,
-            // significa que ya se repartió y él terminó o no le tocó.
-            return Collections.emptyList();
-        }
-
-        // 4. GENERACIÓN DE SELECCIÓN PARA LA SEDE
-        List<Medicamento> totalSedeSelection = generateSedeSelection(sede, cuotaPorSede);
-
-        // 5. REPARTO EQUITATIVO POR FAMILIAS (Round Robin)
-        if (!totalSedeSelection.isEmpty()) {
-            // Consumir permiso si es extra
-            if ("Cíclico Adicional".equals(tipoAAsignar)) {
-                usuario.setFechaBloqueExtra(null);
-                usuarioRepository.save(usuario);
+            if (!yaEmpezoDiarioSede) {
+                tipoAAsignar = "Cíclico";
+            } else if (permisoExtraActivo && !yaHizoExtraSede) {
+                tipoAAsignar = "Cíclico Adicional";
+            } else {
+                // Si ya se generó para la sede pero este usuario no tiene nada asignado,
+                // significa que ya se repartió y él terminó o no le tocó.
+                return Collections.emptyList();
             }
 
-            // Obtener todos los usuarios de la sede (que no sean admin)
-            List<Usuario> operarios = usuarioRepository.findBySedeAndIdRol(sede, 1);
-            if (operarios.isEmpty()) {
-                operarios = Collections.singletonList(usuario);
-            }
+            // 4. GENERACIÓN DE SELECCIÓN PARA LA SEDE
+            List<Medicamento> totalSedeSelection = generateSedeSelection(sede, cuotaPorSede);
 
-            // Agrupar por familia para asegurar que todos los integrantes de un código genérico vayan al mismo usuario
-            Map<String, List<Medicamento>> familiesMap = totalSedeSelection.stream()
-                    .collect(Collectors.groupingBy(m -> m.getCodigogenerico() != null ? m.getCodigogenerico() : "SIN_FAMILIA"));
-
-            List<String> familyKeys = new ArrayList<>(familiesMap.keySet());
-            List<DetalleConteo> nuevosDetalles = new ArrayList<>();
-
-            for (int i = 0; i < familyKeys.size(); i++) {
-                String key = familyKeys.get(i);
-                List<Medicamento> familyMeds = familiesMap.get(key);
-                Usuario targetUser = operarios.get(i % operarios.size());
-
-                for (Medicamento sel : familyMeds) {
-                    DetalleConteo det = new DetalleConteo();
-                    det.setIdMedicamento(sel.getId());
-                    det.setIdUsuario(targetUser.getId());
-                    det.setCantidadActual(sel.getInventario() != null ? sel.getInventario() : 0);
-                    det.setFechaRegistro(fechaHoy);
-                    det.setHoraRegistro(java.time.LocalTime.now());
-                    det.setTipoConteo(tipoAAsignar);
-                    nuevosDetalles.add(det);
-
-                    sel.setEstadoDelConteo("SÍ");
-                    medicamentoRepository.save(sel);
+            // 5. REPARTO EQUITATIVO POR FAMILIAS (Round Robin)
+            if (!totalSedeSelection.isEmpty()) {
+                // Consumir permiso si es extra
+                if ("Cíclico Adicional".equals(tipoAAsignar)) {
+                    usuario.setFechaBloqueExtra(null);
+                    usuarioRepository.save(usuario);
                 }
+
+                // Obtener todos los usuarios de la sede (que no sean admin)
+                List<Usuario> operarios = usuarioRepository.findBySedeAndIdRol(sede, 1);
+                if (operarios.isEmpty()) {
+                    operarios = Collections.singletonList(usuario);
+                }
+
+                // Agrupar por familia para asegurar que todos los integrantes de un código genérico vayan al mismo usuario
+                Map<String, List<Medicamento>> familiesMap = totalSedeSelection.stream()
+                        .collect(Collectors.groupingBy(m -> m.getCodigogenerico() != null ? m.getCodigogenerico() : "SIN_FAMILIA"));
+
+                List<String> familyKeys = new ArrayList<>(familiesMap.keySet());
+                List<DetalleConteo> nuevosDetalles = new ArrayList<>();
+
+                for (int i = 0; i < familyKeys.size(); i++) {
+                    String key = familyKeys.get(i);
+                    List<Medicamento> familyMeds = familiesMap.get(key);
+                    Usuario targetUser = operarios.get(i % operarios.size());
+
+                    for (Medicamento sel : familyMeds) {
+                        DetalleConteo det = new DetalleConteo();
+                        det.setIdMedicamento(sel.getId());
+                        det.setIdUsuario(targetUser.getId());
+                        det.setCantidadActual(sel.getInventario() != null ? sel.getInventario() : 0);
+                        det.setFechaRegistro(fechaHoy);
+                        det.setHoraRegistro(java.time.LocalTime.now());
+                        det.setTipoConteo(tipoAAsignar);
+                        nuevosDetalles.add(det);
+
+                        sel.setEstadoDelConteo("SÍ");
+                        medicamentoRepository.save(sel);
+                    }
+                }
+                detalleConteoRepository.saveAll(nuevosDetalles);
+
+                // Retornar solo lo que le tocó a este usuario
+                return totalSedeSelection.stream()
+                        .filter(m -> nuevosDetalles.stream().anyMatch(
+                                d -> d.getIdUsuario().equals(usuarioId) && d.getIdMedicamento().equals(m.getId())))
+                        .collect(Collectors.toList());
             }
-            detalleConteoRepository.saveAll(nuevosDetalles);
 
-            // Retornar solo lo que le tocó a este usuario
-            return totalSedeSelection.stream()
-                    .filter(m -> nuevosDetalles.stream().anyMatch(
-                            d -> d.getIdUsuario().equals(usuarioId) && d.getIdMedicamento().equals(m.getId())))
-                    .collect(Collectors.toList());
+            return Collections.emptyList();
+        } finally {
+            lock.unlock();
         }
-
-        return Collections.emptyList();
     }
 
     private List<Medicamento> generateSedeSelection(String sede, int totalCuotaFamilias) {
@@ -205,15 +225,15 @@ public class CycleGeneratorService {
     }
 
     private long countFamiliesBySedeAndTipo(String sede, String tipo) {
-        String sql = "SELECT COUNT(DISTINCT m.codigogenerico) FROM medicamento m " +
-                     "JOIN usuario u ON m.idusuario = u.id WHERE u.sede = ? AND m.tipomolecula = ?";
+        String sql = "SELECT COUNT(DISTINCT codigogenerico) FROM medicamento " +
+                     "WHERE sede = ? AND tipomolecula = ?";
         Long count = jdbcTemplate.queryForObject(sql, Long.class, sede, tipo);
         return count != null ? count : 0;
     }
 
     private long countFamiliesBySedeAndTipoAndEstado(String sede, String tipo, int minEstado) {
-        String sql = "SELECT COUNT(DISTINCT m.codigogenerico) FROM medicamento m " +
-                     "JOIN usuario u ON m.idusuario = u.id WHERE u.sede = ? AND m.tipomolecula = ? AND m.estado_conteo_mensual >= ?";
+        String sql = "SELECT COUNT(DISTINCT codigogenerico) FROM medicamento " +
+                     "WHERE sede = ? AND tipomolecula = ? AND estado_conteo_mensual >= ?";
         Long count = jdbcTemplate.queryForObject(sql, Long.class, sede, tipo, minEstado);
         return count != null ? count : 0;
     }
@@ -222,26 +242,22 @@ public class CycleGeneratorService {
         if (limitFamilias <= 0) return new ArrayList<>();
 
         // 1. Obtener los códigos genéricos que cumplen la condición, ordenados por valor total de familia
-        String sqlFamilias = "SELECT m.codigogenerico FROM medicamento m " +
-                            "JOIN usuario u ON m.idusuario = u.id " +
-                            "WHERE u.sede = ? AND m.tipomolecula = ? AND m.estado_conteo_mensual = ? " +
-                            "GROUP BY m.codigogenerico " +
-                            "ORDER BY SUM(m.costototal) DESC LIMIT ?";
-        
+        String sqlFamilias = "SELECT codigogenerico FROM medicamento " +
+                            "WHERE sede = ? AND tipomolecula = ? AND estado_conteo_mensual = ? " +
+                            "GROUP BY codigogenerico " +
+                            "ORDER BY SUM(costototal) DESC LIMIT ?";
+
         List<String> codigosGen = jdbcTemplate.queryForList(sqlFamilias, String.class, sede, tipo, estado, limitFamilias);
-        
+
         if (codigosGen.isEmpty()) return new ArrayList<>();
 
         // 2. Traer todos los medicamentos que pertenecen a esas familias en esa sede.
         // Se deduplica por PLU para garantizar que un medicamento nunca aparezca
         // dos veces en el bloque aunque queden registros residuales en la BD.
-        List<Usuario> usuariosSede = usuarioRepository.findBySede(sede);
-        List<Integer> userIds = usuariosSede.stream().map(Usuario::getId).collect(Collectors.toList());
-
         // LinkedHashMap por PLU: si hay dos registros con el mismo PLU, gana el de menor id
         java.util.LinkedHashMap<String, Medicamento> porPlu = new java.util.LinkedHashMap<>();
         medicamentoRepository.findAll().stream()
-                .filter(m -> userIds.contains(m.getIdUsuario()))
+                .filter(m -> sede.equals(m.getSede()))
                 .filter(m -> codigosGen.contains(m.getCodigogenerico()))
                 .sorted(Comparator.comparing(Medicamento::getId))
                 .forEach(m -> porPlu.putIfAbsent(m.getPlu(), m));
@@ -282,6 +298,11 @@ public class CycleGeneratorService {
         int totalQuota = config.getNumeroConteo() != null ? config.getNumeroConteo() : 10;
         if (totalQuota <= 0)
             return Collections.emptyList();
+
+        // Proteger contra race condition: dos admins disparando el bloque para la misma sede
+        ReentrantLock lock = getLockParaSede(sede);
+        lock.lock();
+        try {
 
         // Verificar si ya existe algo para la sede hoy
         List<DetalleConteo> detallesSedeHoy = detalleConteoRepository.findBySedeAndFecha(sede, fechaHoy);
@@ -353,5 +374,9 @@ public class CycleGeneratorService {
         }
 
         return Collections.emptyList();
+
+        } finally {
+            lock.unlock();
+        }
     }
 }

@@ -18,6 +18,11 @@ public class JwtUtil {
     @org.springframework.beans.factory.annotation.Value("${jwt.secret:pharmaser_secret_key_2026_default_long_string_for_security}")
     private String secret;
 
+    /** Tiempo de vida del token en ms. Configurable con jwt.expiration-ms en application.properties.
+     *  Valor por defecto: 10 horas (36 000 000 ms). */
+    @org.springframework.beans.factory.annotation.Value("${jwt.expiration-ms:36000000}")
+    private long expirationMs;
+
     private Key getSigningKey() {
         byte[] keyBytes = secret.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         // Asegurarse de que la llave tenga al menos 256 bits (32 bytes) para HS256
@@ -67,7 +72,7 @@ public class JwtUtil {
                 .setClaims(claims)
                 .setSubject(subject)
                 .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10))
+                .setExpiration(new Date(System.currentTimeMillis() + expirationMs))
                 .signWith(getSigningKey())
                 .compact();
     }

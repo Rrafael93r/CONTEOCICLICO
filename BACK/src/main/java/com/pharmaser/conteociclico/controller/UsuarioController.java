@@ -16,11 +16,13 @@ public class UsuarioController {
     @Autowired
     private UsuarioService usuarioService;
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @GetMapping
     public List<Usuario> getAll() {
         return usuarioService.getAllUsuarios();
     }
 
+    @PreAuthorize("hasAnyRole('ADMINISTRADOR', 'CONTROL_DE_INVENTARIO')")
     @GetMapping("/{id}")
     public ResponseEntity<Usuario> getById(@PathVariable @NonNull Integer id) {
         return usuarioService.getUsuarioById(id)

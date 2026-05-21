@@ -51,9 +51,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ApiError> handleRuntime(RuntimeException ex) {
-        logger.error("RuntimeException no controlada: {}", ex.getMessage());
+        // Se loguea el mensaje real internamente pero NO se expone al cliente
+        // para evitar fugas de info (stack traces, SQL, rutas internas, etc.)
+        logger.error("RuntimeException no controlada: {}", ex.getMessage(), ex);
         return ResponseEntity.status(500)
-                .body(new ApiError("INTERNAL_ERROR", ex.getMessage(), LocalDateTime.now()));
+                .body(new ApiError("INTERNAL_ERROR", "Error interno del servidor", LocalDateTime.now()));
     }
 
     @ExceptionHandler(Exception.class)

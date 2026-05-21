@@ -98,14 +98,15 @@ const AdminPanel: React.FC = () => {
                 const summary = await getMedicamentoSummary();
                 setMedSummary(summary);
             } else if (activeTab === 'reportes') {
-                // Determine if filterUser is a number (idUsuario) or string (sedeName)
-                const isSede = typeof filterUser === 'string';
+                // filterUser es siempre un código de sede (string) o vacío ('').
+                // Solo enviamos el parámetro sede cuando hay valor real para no pasar sede='' a la API.
+                const sedeFilter = filterUser ? String(filterUser) : undefined;
                 const data = await getAllDetalles(
-                    !isSede && filterUser ? Number(filterUser) : undefined,
+                    undefined,
                     undefined,
                     startDate,
                     endDate,
-                    isSede ? filterUser : undefined
+                    sedeFilter
                 );
                 setDetalles(data);
             } else if (activeTab === 'seguimiento') {
@@ -302,13 +303,9 @@ const AdminPanel: React.FC = () => {
         if (startDate) filteredData = filteredData.filter(d => d.fechaRegistro >= startDate);
         if (endDate) filteredData = filteredData.filter(d => d.fechaRegistro <= endDate);
         
+        // filterUser es siempre un código de sede (string) tras la refactorización idusuario→sede
         if (filterUser) {
-            const isSede = typeof filterUser === 'string';
-            if (isSede) {
-                filteredData = filteredData.filter(d => d.usuario?.sede === filterUser);
-            } else {
-                filteredData = filteredData.filter(d => d.idUsuario === Number(filterUser));
-            }
+            filteredData = filteredData.filter(d => d.usuario?.sede === String(filterUser));
         }
 
         if (filteredData.length === 0) {
@@ -602,8 +599,8 @@ const AdminPanel: React.FC = () => {
     };
 
     const filteredMeds = medicamentos.filter(m => {
-        // Filtrar por el usuario/sede seleccionado actualmente
-        if (selectedUser && m.idUsuario !== Number(selectedUser)) return false;
+        // Filtrar por sede seleccionada (selectedUser es siempre un código de sede string)
+        if (selectedUser && m.sede !== String(selectedUser)) return false;
 
         return (
             (m.descripcion?.toLowerCase() || '').includes(medSearchTerm.toLowerCase()) ||

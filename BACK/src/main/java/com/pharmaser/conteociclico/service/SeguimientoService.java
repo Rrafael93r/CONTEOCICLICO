@@ -40,30 +40,31 @@ public class SeguimientoService {
     }
 
     public GlobalSeguimientoMensualDTO getSeguimientoMensual() {
-        List<Object[]> stats = medicamentoRepository.getMedicamentoStatsPerSedeAndType();
+        // getMedicamentoStatsWithCanonicalUser devuelve 8 columnas:
+        // [0] idusuario, [1] sede, [2] fecha_bloque_extra, [3] tipo,
+        // [4] total,     [5] contados, [6] a_una, [7] a_dos
+        List<Object[]> stats = medicamentoRepository.getMedicamentoStatsWithCanonicalUser();
 
         Map<String, SeguimientoMensualDTO> reportePorSedesMap = new HashMap<>();
         SeguimientoMensualDTO consolidadoGlobal = new SeguimientoMensualDTO();
         consolidadoGlobal.setSede("Global");
 
         for (Object[] row : stats) {
-            Integer idUser = ((Number) row[0]).intValue();
-            String usuario = (String) row[1];
-            String sede = (String) row[2];
-            String fechaExtra = (row[3] != null) ? row[3].toString() : null;
-            String type = (row[4] != null) ? row[4].toString().toUpperCase() : "C";
-            long total = ((Number) row[5]).longValue();
-            long contadas = ((Number) row[6]).longValue();
-            long aUna = (row[7] != null) ? ((Number) row[7]).longValue() : 0;
-            long aDos = (row[8] != null) ? ((Number) row[8]).longValue() : 0;
-            
-            // Usamos una combinacion para la llave del mapa para asegurar unicidad
-            String key = idUser + "_" + sede;
+            Integer idUser = (row[0] != null) ? ((Number) row[0]).intValue() : 0;
+            String sede     = (String) row[1];
+            String fechaExtra = (row[2] != null) ? row[2].toString() : null;
+            String type     = (row[3] != null) ? row[3].toString().toUpperCase() : "C";
+            long total      = ((Number) row[4]).longValue();
+            long contadas   = ((Number) row[5]).longValue();
+            long aUna       = (row[6] != null) ? ((Number) row[6]).longValue() : 0;
+            long aDos       = (row[7] != null) ? ((Number) row[7]).longValue() : 0;
+
+            // Usamos sede como llave única (una entrada por sede)
+            String key = sede != null ? sede : "SIN_SEDE";
             SeguimientoMensualDTO dto = reportePorSedesMap.computeIfAbsent(key, k -> {
                 SeguimientoMensualDTO n = new SeguimientoMensualDTO();
                 n.setIdUsuario(idUser);
-                String nombreAMostrar = (usuario != null && !usuario.trim().isEmpty()) ? usuario : (sede != null ? sede : "DESCONOCIDO");
-                n.setUsuario(nombreAMostrar);
+                n.setUsuario(sede != null ? sede : "DESCONOCIDO");
                 n.setSede(sede);
                 n.setFechaBloqueExtra(fechaExtra);
                 return n;

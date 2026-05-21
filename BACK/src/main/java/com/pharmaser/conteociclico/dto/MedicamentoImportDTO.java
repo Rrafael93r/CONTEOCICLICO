@@ -6,7 +6,8 @@ import lombok.Data;
 public class MedicamentoImportDTO {
     private String plu;
     private String descripcion;
-    private Integer idUsuario;
+    /** Código de sede destino (ej. "037"). Reemplaza idUsuario. */
+    private String sede;
     private Integer inventario;
     private Double costo;
     private Double costoTotal;

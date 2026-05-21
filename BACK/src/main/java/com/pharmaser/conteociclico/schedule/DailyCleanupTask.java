@@ -1,17 +1,14 @@
 package com.pharmaser.conteociclico.schedule;
 
-import com.pharmaser.conteociclico.model.DetalleConteo;
-import com.pharmaser.conteociclico.model.Medicamento;
-import com.pharmaser.conteociclico.repository.DetalleConteoRepository;
-import com.pharmaser.conteociclico.repository.MedicamentoRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.List;
 
 @Component
 public class DailyCleanupTask {
@@ -19,36 +16,30 @@ public class DailyCleanupTask {
     private static final Logger logger = LoggerFactory.getLogger(DailyCleanupTask.class);
 
     @Autowired
-    private DetalleConteoRepository detalleConteoRepository;
-
-    @Autowired
-    private MedicamentoRepository medicamentoRepository;
+    private JdbcTemplate jdbcTemplate;
 
     /**
      * Ejecutar todos los días a las 23:59:00 P.M.
-     * Cron: Segundos Minutos Horas DiaDeMes Mes DiaDeSemana
+     * Libera en un único UPDATE en lote todos los medicamentos que quedaron
+     * asignados hoy pero nunca fueron contados (cantidad_contada IS NULL),
+     * evitando el patrón N+1 que generaba una query por medicamento.
      */
     @Scheduled(cron = "0 59 23 * * ?")
+    @Transactional
     public void cleanupUncountedMedications() {
         LocalDate hoy = LocalDate.now();
-        logger.info("Iniciando Robot Nocturno de limpieza (DailyCleanupTask) para la fecha: " + hoy);
+        logger.info("Iniciando Robot Nocturno (DailyCleanupTask) para la fecha: {}", hoy);
 
-        List<DetalleConteo> asignadosHoy = detalleConteoRepository.findByFechaRegistro(hoy);
-        int devueltos = 0;
+        int devueltos = jdbcTemplate.update(
+            "UPDATE medicamento m " +
+            "INNER JOIN detalleconteo d ON d.idmedicamento = m.id " +
+            "SET m.estadodelconteo = 'no' " +
+            "WHERE d.fecharegistro = ? " +
+            "  AND d.cantidadcontada IS NULL " +
+            "  AND LOWER(m.estadodelconteo) = 'sí'",
+            hoy
+        );
 
-        for (DetalleConteo d : asignadosHoy) {
-            // Si el farmaceuta nunca registró una cantidad final, asumimos el registro como huérfano.
-            if (d.getCantidadContada() == null) {
-                Medicamento m = d.getMedicamento();
-                // Liberar el estado en la tabla de inventario general
-                if (m != null && "sí".equalsIgnoreCase(m.getEstadoDelConteo())) {
-                    m.setEstadoDelConteo("no");
-                    medicamentoRepository.save(m);
-                    devueltos++;
-                }
-            }
-        }
-        
-        logger.info("El Robot Nocturno terminó con éxito. Total de medicamentos devueltos a la piscina de inventario: " + devueltos);
+        logger.info("Robot Nocturno completado. {} medicamento(s) devueltos a la piscina de inventario.", devueltos);
     }
 }

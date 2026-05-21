@@ -31,8 +31,13 @@ public class UsuarioService {
     }
 
     public Usuario saveUsuario(Usuario usuario) {
-        // Encode password before saving ONLY if it's not already starting with $2a$ (BCrypt prefix)
-        if (usuario.getContrasena() != null && !usuario.getContrasena().startsWith("$2a$")) {
+        // Encode password only if it's not already a BCrypt hash.
+        // BCrypt hashes can start with $2a$, $2b$ or $2y$ — all three variants
+        // are produced by different versions of the spec but are equally valid.
+        if (usuario.getContrasena() != null
+                && !usuario.getContrasena().startsWith("$2a$")
+                && !usuario.getContrasena().startsWith("$2b$")
+                && !usuario.getContrasena().startsWith("$2y$")) {
             usuario.setContrasena(passwordEncoder.encode(usuario.getContrasena()));
         }
         return usuarioRepository.save(usuario);

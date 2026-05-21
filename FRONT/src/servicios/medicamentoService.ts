@@ -8,6 +8,11 @@ export interface Medicamento {
     descripcion: string;
     estadoDelConteo: string;
     tipomolecula?: string;
+    /** Código de sede al que pertenece el medicamento (ej. "037").
+     *  Reemplaza el antiguo idUsuario tras la refactorización idusuario→sede. */
+    sede?: string;
+    /** @deprecated Usar `sede` en su lugar. Solo se mantiene por compatibilidad con
+     *  endpoints que aún aceptan idUsuario como filtro (DetalleConteo). */
     idUsuario?: number;
     inventario?: number;
     costo?: number;

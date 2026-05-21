@@ -41,19 +41,19 @@ public class AutomatedImportService {
     @Value("${app.auto-import.delete-after-process:false}")
     private boolean deleteAfterProcess;
 
-    @Value("${app.sftp.host}")
+    @Value("${app.sftp.host:}")
     private String sftpHost;
 
     @Value("${app.sftp.port:22}")
     private int sftpPort;
 
-    @Value("${app.sftp.username}")
+    @Value("${app.sftp.username:}")
     private String sftpUser;
 
-    @Value("${app.sftp.password}")
+    @Value("${app.sftp.password:}")
     private String sftpPassword;
 
-    @Value("${app.sftp.remote-path}")
+    @Value("${app.sftp.remote-path:}")
     private String sftpRemotePath;
 
     @Autowired
@@ -62,21 +62,26 @@ public class AutomatedImportService {
     @Autowired
     private com.pharmaser.conteociclico.repository.LogCargaAutomaticaRepository logRepository;
 
-    private final java.util.concurrent.atomic.AtomicBoolean isProcessing = new java.util.concurrent.atomic.AtomicBoolean(
-            false);
+    private final java.util.concurrent.atomic.AtomicBoolean isProcessing =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Autowired
     private com.pharmaser.conteociclico.repository.CacheIdempotenciaRepository idempotenciaRepository;
 
+    // ── API pública para que el controller sepa si hay un ciclo activo ──────────
+    public boolean isRunning() {
+        return isProcessing.get();
+    }
+
+    // ── Hash SHA-256 de archivo ──────────────────────────────────────────────────
     private String calculateFileHash(File file) {
         try {
             java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] encodedhash = digest.digest(Files.readAllBytes(file.toPath()));
-            StringBuilder hexString = new StringBuilder(2 * encodedhash.length);
-            for (byte b : encodedhash) {
+            byte[] encodedHash = digest.digest(Files.readAllBytes(file.toPath()));
+            StringBuilder hexString = new StringBuilder(2 * encodedHash.length);
+            for (byte b : encodedHash) {
                 String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1)
-                    hexString.append('0');
+                if (hex.length() == 1) hexString.append('0');
                 hexString.append(hex);
             }
             return hexString.toString();
@@ -86,14 +91,11 @@ public class AutomatedImportService {
         }
     }
 
+    // ── Escaneo de archivos locales (cada 5 min) ─────────────────────────────────
     @Scheduled(fixedRateString = "${app.auto-import.scan-rate:300000}")
     public void processFiles() {
-        if (!enabled)
-            return;
-        // compareAndSet garantiza atomicidad: evita que dos hilos entren simultáneamente
-        if (!isProcessing.compareAndSet(false, true)) {
-            return;
-        }
+        if (!enabled) return;
+        if (!isProcessing.compareAndSet(false, true)) return;
         try {
             doProcessLocalFiles();
         } finally {
@@ -102,8 +104,8 @@ public class AutomatedImportService {
     }
 
     /**
-     * Lógica interna de procesamiento de archivos locales.
-     * Solo se llama desde métodos que ya adquirieron el lock isProcessing.
+     * Procesamiento local: escanea la carpeta de entrada y procesa cada archivo nuevo.
+     * Crea un log entry para CADA archivo, más uno de tipo SFTP_SYNC cuando no hay archivos.
      */
     private void doProcessLocalFiles() {
         try {
@@ -112,23 +114,35 @@ public class AutomatedImportService {
                 folder.mkdirs();
             }
 
-            File[] files = folder.listFiles((dir, name) -> name.toLowerCase().endsWith(".csv")
-                    || name.toLowerCase().endsWith(".xlsx") || name.toLowerCase().endsWith(".xls"));
+            File[] files = folder.listFiles((dir, name) ->
+                    name.toLowerCase().endsWith(".csv") ||
+                    name.toLowerCase().endsWith(".xlsx") ||
+                    name.toLowerCase().endsWith(".xls"));
 
-            if (files == null || files.length == 0)
+            if (files == null || files.length == 0) {
+                // ── FIX: Registrar que el scan ocurrió pero no había archivos ──────
+                crearLogEscaneoVacio();
                 return;
+            }
 
             // Ordenar por fecha para procesar los más viejos primero
             Arrays.sort(files, Comparator.comparingLong(File::lastModified));
 
+            // userSedeMap se mantiene por compatibilidad con normalizeAndValidate (ignorado internamente)
+            @SuppressWarnings("deprecation")
             Map<String, Integer> userSedeMap = medicamentoService.buildUserSedeMap();
 
             for (File file : files) {
                 String hash = calculateFileHash(file);
-                if (hash == null) continue;
+                if (hash == null) {
+                    // ── FIX: Registrar archivos que no pudieron hashearse ────────────
+                    crearLogError(file.getName(), "No se pudo calcular el hash SHA-256 del archivo. " +
+                            "Puede estar bloqueado o corrupto.");
+                    continue;
+                }
 
                 if (idempotenciaRepository.existsById(hash)) {
-                    logger.info("Archivo {} ya procesado anteriormente (Hash duplicado). Moviendo a procesados.", file.getName());
+                    logger.info("Archivo {} ya procesado (Hash duplicado). Moviendo a procesados.", file.getName());
                     try {
                         moveFile(file, true);
                     } catch (IOException e) {
@@ -140,7 +154,7 @@ public class AutomatedImportService {
                 processSingleFile(file, userSedeMap, hash, false);
             }
 
-            // Una única reclasificación al final de todo el lote
+            // Única reclasificación al final del lote
             try {
                 medicamentoService.reclassifyAllMedicamentos();
             } catch (Exception e) {
@@ -152,29 +166,38 @@ public class AutomatedImportService {
         }
     }
 
-    private void processSingleFile(File file, Map<String, Integer> userSedeMap, String hash, boolean triggerReclass) {
+    /**
+     * Procesa un único archivo. Log entry siempre creado (EXITOSO / ERROR / FALLIDO).
+     *
+     * FIX: El estado del log refleja el PROCESAMIENTO, no el movimiento del archivo.
+     * Si el procesamiento fue exitoso pero mover el archivo falla, el log queda EXITOSO
+     * con una nota en el detalle — el archivo se moverá en el próximo ciclo (idempotencia).
+     */
+    private void processSingleFile(File file, Map<String, Integer> userSedeMap,
+                                    String hash, boolean triggerReclass) {
         LogCargaAutomatica logEntry = new LogCargaAutomatica();
         logEntry.setFechaInicio(LocalDateTime.now());
         logEntry.setNombreArchivo(file.getName());
         logEntry.setEstado("PROCESANDO");
-        logRepository.save(logEntry);
+        logRepository.save(logEntry);  // ID generado desde aquí
 
         StringBuilder logDetails = new StringBuilder(
                 "Iniciando procesamiento de " + file.getName() + " (Hash: " + hash + ")\n");
         List<Map<String, String>> rawData = new ArrayList<>();
+        boolean processingOk = false;
 
         try {
+            // ── Lectura del archivo ──────────────────────────────────────────────
             if (file.getName().toLowerCase().endsWith(".csv")) {
                 rawData = tryReadAsCsv(file);
-            } else if (file.getName().toLowerCase().endsWith(".xlsx")
-                    || file.getName().toLowerCase().endsWith(".xls")) {
+            } else if (file.getName().toLowerCase().endsWith(".xlsx") ||
+                       file.getName().toLowerCase().endsWith(".xls")) {
                 try {
                     DataFormatter dataFormatter = new DataFormatter();
                     try (Workbook workbook = WorkbookFactory.create(file)) {
                         Sheet sheet = workbook.getSheetAt(0);
                         Row headerRow = sheet.getRow(0);
-                        if (headerRow == null)
-                            throw new RuntimeException("Archivo Excel vacío");
+                        if (headerRow == null) throw new RuntimeException("Archivo Excel vacío");
 
                         List<String> headers = new ArrayList<>();
                         for (Cell cell : headerRow) {
@@ -183,8 +206,7 @@ public class AutomatedImportService {
 
                         for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                             Row row = sheet.getRow(i);
-                            if (row == null)
-                                continue;
+                            if (row == null) continue;
                             Map<String, String> rowDataMap = new HashMap<>();
                             for (int j = 0; j < headers.size(); j++) {
                                 Cell cell = row.getCell(j);
@@ -195,36 +217,30 @@ public class AutomatedImportService {
                     }
                 } catch (Exception excelEx) {
                     logDetails.append("Error de formato Excel (POI): ").append(excelEx.getMessage())
-                            .append(". Intentando fallback como CSV...\n");
+                              .append(". Intentando fallback como CSV...\n");
                     rawData = tryReadAsCsv(file);
                 }
             }
 
+            // ── Validación y carga ───────────────────────────────────────────────
             if (rawData != null && !rawData.isEmpty()) {
                 logDetails.append("Registros leídos: ").append(rawData.size()).append("\n");
-                List<MedicamentoImportDTO> validItems = medicamentoService.normalizeAndValidate(rawData, userSedeMap,
-                        logDetails);
+                List<MedicamentoImportDTO> validItems =
+                        medicamentoService.normalizeAndValidate(rawData, userSedeMap, logDetails);
                 medicamentoService.importFromExternalData(validItems);
 
                 logEntry.setRegistrosLeidos(rawData.size());
-                logEntry.setRegistrosProcesados(validItems.size());   // ← antes siempre quedaba en 0
-                logEntry.setFechaFin(LocalDateTime.now());
+                logEntry.setRegistrosProcesados(validItems.size());
 
-                String detailStr = logDetails.toString();
-                if (detailStr.length() > 60000) {
-                    detailStr = detailStr.substring(0, 60000) + "... [Truncado]";
-                }
-                logEntry.setDetalle(detailStr);
-
-                // Registro de Idempotencia: Guardar el hash después del éxito total
-                com.pharmaser.conteociclico.model.CacheIdempotencia cache = new com.pharmaser.conteociclico.model.CacheIdempotencia();
+                // Idempotencia: guardar hash DESPUÉS del éxito total de procesamiento
+                com.pharmaser.conteociclico.model.CacheIdempotencia cache =
+                        new com.pharmaser.conteociclico.model.CacheIdempotencia();
                 cache.setHashSha256(hash);
                 cache.setNombreArchivo(file.getName());
                 cache.setTamanoBytes(file.length());
                 cache.setFechaProcesamiento(LocalDateTime.now());
                 idempotenciaRepository.save(cache);
 
-                // Reclasificación opcional (ahora se controla desde el lote)
                 if (triggerReclass) {
                     try {
                         medicamentoService.reclassifyAllMedicamentos();
@@ -236,40 +252,95 @@ public class AutomatedImportService {
                 }
 
                 logEntry.setEstado("EXITOSO");
-                moveFile(file, true);
+                processingOk = true;
 
             } else {
+                logEntry.setRegistrosLeidos(rawData != null ? rawData.size() : 0);
+                logEntry.setRegistrosProcesados(0);
                 logEntry.setEstado("ERROR");
-                logEntry.setDetalle("No se encontraron registros válidos o el archivo está corrupto/vacío.\n"
-                        + logDetails.toString());
-                moveFile(file, false);
+                logDetails.append("No se encontraron registros válidos o el archivo está corrupto/vacío.");
             }
-
-            logEntry.setFechaFin(LocalDateTime.now());
 
         } catch (Exception e) {
             logger.error("Error procesando archivo automático {}: ", file.getName(), e);
             logEntry.setEstado("FALLIDO");
-            logEntry.setFechaFin(LocalDateTime.now());
-            String finalLog = logDetails.append("\nError fatal: ").append(e.getMessage()).toString();
-            if (finalLog.length() > 60000)
-                finalLog = finalLog.substring(0, 60000) + "... [Truncado]";
-            logEntry.setDetalle(finalLog);
-            try {
-                moveFile(file, false);
-            } catch (IOException ex) {
-                logger.error("Error moviendo archivo fallido: {}", ex.getMessage());
-            }
+            logDetails.append("\nError fatal durante procesamiento: ").append(e.getMessage());
+
         } finally {
+            // ── Siempre guardar el log con el estado de PROCESAMIENTO ────────────
+            logEntry.setFechaFin(LocalDateTime.now());
+            String detailStr = logDetails.toString();
+            if (detailStr.length() > 60000) detailStr = detailStr.substring(0, 60000) + "... [Truncado]";
+            logEntry.setDetalle(detailStr);
             logRepository.save(logEntry);
+        }
+
+        // ── Mover el archivo FUERA del try principal ──────────────────────────────
+        // FIX: El fallo al mover no debe cambiar el estado de procesamiento.
+        // Si el archivo no puede moverse, en el próximo ciclo se detectará como
+        // duplicado (hash ya está en idempotencia) y se intentará mover de nuevo.
+        // Captura final para uso dentro del lambda (processingOk no es effectively final
+        // porque se reasigna en el bloque try principal).
+        final boolean processingOkFinal = processingOk;
+        try {
+            moveFile(file, processingOkFinal);
+        } catch (IOException e) {
+            logger.error("No se pudo mover el archivo {} tras procesamiento ({}): {}",
+                    file.getName(), processingOkFinal ? "EXITOSO" : "FALLIDO", e.getMessage());
+            // Actualizar detalle del log con la advertencia de movimiento fallido
+            logRepository.findByNombreArchivo(file.getName()).ifPresent(existingLog -> {
+                String d = existingLog.getDetalle() != null ? existingLog.getDetalle() : "";
+                existingLog.setDetalle(d + "\n⚠ Advertencia: no se pudo mover el archivo a la carpeta de " +
+                        (processingOkFinal ? "procesados" : "fallidos") + ". Se intentará en el próximo ciclo.");
+                logRepository.save(existingLog);
+            });
         }
     }
 
+    // ── Helpers de log para casos sin archivo ──────────────────────────────────
+    private void crearLogEscaneoVacio() {
+        // Solo se crea una entrada si la última entrada de escaneo tiene más de 10 minutos
+        // para no saturar la tabla con entradas "sin archivos" cada 5 minutos.
+        logRepository.findAllByOrderByFechaInicioDesc().stream()
+                .filter(l -> "ESCANEO_SIN_ARCHIVOS".equals(l.getNombreArchivo()))
+                .findFirst()
+                .ifPresentOrElse(ultimo -> {
+                    if (ultimo.getFechaInicio() != null &&
+                            ultimo.getFechaInicio().plusMinutes(10).isBefore(LocalDateTime.now())) {
+                        persistirLogEscaneoVacio();
+                    }
+                }, this::persistirLogEscaneoVacio);
+    }
+
+    private void persistirLogEscaneoVacio() {
+        LogCargaAutomatica log = new LogCargaAutomatica();
+        log.setNombreArchivo("ESCANEO_SIN_ARCHIVOS");
+        log.setFechaInicio(LocalDateTime.now());
+        log.setFechaFin(LocalDateTime.now());
+        log.setEstado("EXITOSO");
+        log.setRegistrosLeidos(0);
+        log.setRegistrosProcesados(0);
+        log.setDetalle("Escaneo de carpeta completado. No se encontraron archivos nuevos para procesar.");
+        logRepository.save(log);
+    }
+
+    private void crearLogError(String nombreArchivo, String detalle) {
+        LogCargaAutomatica log = new LogCargaAutomatica();
+        log.setNombreArchivo(nombreArchivo);
+        log.setFechaInicio(LocalDateTime.now());
+        log.setFechaFin(LocalDateTime.now());
+        log.setEstado("ERROR");
+        log.setRegistrosLeidos(0);
+        log.setRegistrosProcesados(0);
+        log.setDetalle(detalle);
+        logRepository.save(log);
+    }
+
+    // ── CSV reader con auto-detección de delimitador ─────────────────────────────
     private List<Map<String, String>> tryReadAsCsv(File file) {
-        char[] delimiters = { ';', ',', '\t' };
+        char[] delimiters = {';', ',', '\t'};
         char detectedDelimiter = 0;
 
-        // 1. Detectar el delimitador probando las primeras líneas
         for (char delimiter : delimiters) {
             try (CSVReader reader = new CSVReaderBuilder(new FileReader(file))
                     .withCSVParser(new com.opencsv.RFC4180ParserBuilder().withSeparator(delimiter).build())
@@ -284,14 +355,11 @@ public class AutomatedImportService {
         }
 
         List<Map<String, String>> data = new ArrayList<>();
-        if (detectedDelimiter == 0)
-            detectedDelimiter = ';'; // Default
+        if (detectedDelimiter == 0) detectedDelimiter = ';';
 
-        // 2. Leer el archivo completo con el delimitador detectado
         try (CSVReader reader = new CSVReaderBuilder(new FileReader(file))
                 .withCSVParser(new com.opencsv.RFC4180ParserBuilder().withSeparator(detectedDelimiter).build())
                 .build()) {
-
             String[] header = reader.readNext();
             if (header != null) {
                 String[] line;
@@ -304,11 +372,12 @@ public class AutomatedImportService {
                 }
             }
         } catch (Exception e) {
-            logger.error("Error definitivo leyendo CSV con delimitador " + detectedDelimiter, e);
+            logger.error("Error definitivo leyendo CSV con delimitador {}", detectedDelimiter, e);
         }
         return data;
     }
 
+    // ── Mover archivo ────────────────────────────────────────────────────────────
     private void moveFile(File file, boolean success) throws IOException {
         if (deleteAfterProcess && success) {
             Files.deleteIfExists(file.toPath());
@@ -318,48 +387,76 @@ public class AutomatedImportService {
 
         String subFolder = success ? "" : "/fallidos";
         Path targetDir = Paths.get(processedPath + subFolder);
-        
+
         if (!Files.exists(targetDir)) {
             Files.createDirectories(targetDir);
         }
 
         String timestamp = String.valueOf(System.currentTimeMillis());
         Path targetPath = targetDir.resolve(timestamp + "_" + file.getName());
-        
+
         try {
             Files.move(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            logger.error("No se pudo mover el archivo {} a {}: {}", file.getName(), targetPath, e.getMessage());
-            // Si falla el movimiento, intentamos copiar y borrar (algunas veces falla en Windows si hay bloqueos)
+            logger.error("No se pudo mover {} a {}: {}", file.getName(), targetPath, e.getMessage());
+            // Fallback: copiar + borrar
             Files.copy(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
             Files.deleteIfExists(file.toPath());
         }
     }
 
-    // Ejecutar inmediatamente al arrancar el proyecto
+    // ── Arranque: primera sincronización SFTP ────────────────────────────────────
     @org.springframework.context.event.EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
-        if (!enabled)
+        if (!enabled) {
+            logger.info("Carga automática DESHABILITADA (app.auto-import.enabled=false). " +
+                        "Cambia APP_AUTO_IMPORT_ENABLED=true para activarla.");
             return;
+        }
         logger.info(">>> ARRANQUE: Iniciando primera sincronización automática desde SFTP...");
         scheduledBotSync();
     }
 
-    @Scheduled(fixedDelayString = "${app.auto-import.polling-rate:1800000}") // Default 30 min
+    // ── Sincronización completa SFTP + procesamiento local (cada 30 min) ─────────
+    @Scheduled(fixedDelayString = "${app.auto-import.polling-rate:1800000}")
     public void scheduledBotSync() {
-        if (!enabled)
-            return;
-        // Guard al nivel del ciclo SFTP completo: descarga + procesamiento son una sola
-        // unidad atómica. Si el scheduler y onApplicationReady disparan casi al mismo
-        // tiempo, el segundo hilo ve isProcessing=true y desiste ANTES de conectarse
-        // al SFTP, evitando la doble descarga y el "No such file" al borrar.
+        if (!enabled) return;
         if (!isProcessing.compareAndSet(false, true)) {
             logger.info("Sincronización SFTP ya en progreso (otro hilo activo). Saltando esta ejecución.");
             return;
         }
+
+        LogCargaAutomatica sftpLog = new LogCargaAutomatica();
+        sftpLog.setNombreArchivo("SFTP_SYNC");
+        sftpLog.setFechaInicio(LocalDateTime.now());
+        sftpLog.setEstado("PROCESANDO");
+        sftpLog.setRegistrosLeidos(0);
+        sftpLog.setRegistrosProcesados(0);
+        logRepository.save(sftpLog);
+
         try {
             logger.info("Iniciando sincronización programada desde SFTP...");
-            downloadFilesFromSftp();
+
+            // ── FIX: SFTP ahora devuelve el nº de archivos descargados y lanza excepción si falla
+            int descargados = downloadFilesFromSftp();
+            sftpLog.setEstado("EXITOSO");
+            sftpLog.setDetalle("SFTP completado. Archivos descargados: " + descargados);
+            sftpLog.setRegistrosLeidos(descargados);
+
+        } catch (Exception e) {
+            // ── FIX: Los errores SFTP ahora quedan registrados en la tabla de logs
+            String msg = "Error de conexión/descarga SFTP: " + e.getMessage();
+            logger.error(msg, e);
+            sftpLog.setEstado("FALLIDO");
+            sftpLog.setDetalle(msg);
+        } finally {
+            sftpLog.setFechaFin(LocalDateTime.now());
+            logRepository.save(sftpLog);
+        }
+
+        // Procesar archivos locales independientemente del resultado SFTP
+        // (puede haber archivos subidos manualmente)
+        try {
             doProcessLocalFiles();
             logger.info("Sincronización técnica completada.");
         } finally {
@@ -367,10 +464,25 @@ public class AutomatedImportService {
         }
     }
 
-    private void downloadFilesFromSftp() {
+    /**
+     * Descarga archivos desde SFTP.
+     *
+     * FIX: Ahora lanza excepción si la conexión falla (en lugar de tragársela)
+     * para que scheduledBotSync() pueda registrarla en el log.
+     *
+     * @return número de archivos descargados exitosamente
+     * @throws Exception si la conexión o autenticación SFTP falla
+     */
+    private int downloadFilesFromSftp() throws Exception {
+        if (sftpHost == null || sftpHost.isBlank()) {
+            logger.info("SFTP no configurado (SFTP_HOST vacío). Saltando descarga remota.");
+            return 0;
+        }
+
         logger.info("Conectando a SFTP {}:{}...", sftpHost, sftpPort);
         Session session = null;
         ChannelSftp channelSftp = null;
+        int descargados = 0;
 
         try {
             JSch jsch = new JSch();
@@ -381,20 +493,22 @@ public class AutomatedImportService {
             config.put("StrictHostKeyChecking", "no");
             session.setConfig(config);
 
-            session.connect();
+            session.connect(15000); // timeout de 15 s
             channelSftp = (ChannelSftp) session.openChannel("sftp");
-            channelSftp.connect();
+            channelSftp.connect(10000);
 
             channelSftp.cd(sftpRemotePath);
 
+            @SuppressWarnings("unchecked")
             Vector<ChannelSftp.LsEntry> fileList = channelSftp.ls("*");
             List<ChannelSftp.LsEntry> remoteFiles = new ArrayList<>();
 
             for (ChannelSftp.LsEntry entry : fileList) {
                 if (!entry.getAttrs().isDir()) {
                     String fileName = entry.getFilename();
-                    if (fileName.toLowerCase().endsWith(".xls") || fileName.toLowerCase().endsWith(".xlsx")
-                            || fileName.toLowerCase().endsWith(".csv")) {
+                    if (fileName.toLowerCase().endsWith(".xls") ||
+                        fileName.toLowerCase().endsWith(".xlsx") ||
+                        fileName.toLowerCase().endsWith(".csv")) {
                         remoteFiles.add(entry);
                     }
                 }
@@ -402,37 +516,35 @@ public class AutomatedImportService {
 
             if (remoteFiles.isEmpty()) {
                 logger.info("No se encontraron archivos nuevos en el SFTP.");
-                return;
+                return 0;
             }
 
-            logger.info("Se detectaron {} archivos en SFTP. Iniciando descarga...", remoteFiles.size());
+            logger.info("Se detectaron {} archivo(s) en SFTP. Iniciando descarga...", remoteFiles.size());
 
             for (ChannelSftp.LsEntry entry : remoteFiles) {
                 String fileName = entry.getFilename();
                 File localFile = new File(inputPath, fileName);
-                
+
                 try (FileOutputStream fos = new FileOutputStream(localFile)) {
                     channelSftp.get(fileName, fos);
                     logger.info("Archivo {} descargado exitosamente.", fileName);
-                    
-                    // Solo eliminamos del SFTP si la descarga local fue exitosa
+                    descargados++;
+
                     try {
                         channelSftp.rm(fileName);
                     } catch (Exception e) {
                         logger.error("No se pudo eliminar {} del SFTP tras descarga: {}", fileName, e.getMessage());
                     }
                 } catch (Exception downloadEx) {
-                    logger.error("Error descargando archivo {} desde SFTP: {}", fileName, downloadEx.getMessage());
+                    logger.error("Error descargando {} desde SFTP: {}", fileName, downloadEx.getMessage());
                 }
             }
 
-        } catch (Exception e) {
-            logger.error("Error durante el proceso SFTP: {}", e.getMessage());
+            return descargados;
+
         } finally {
-            if (channelSftp != null && channelSftp.isConnected())
-                channelSftp.disconnect();
-            if (session != null && session.isConnected())
-                session.disconnect();
+            if (channelSftp != null && channelSftp.isConnected()) channelSftp.disconnect();
+            if (session != null && session.isConnected()) session.disconnect();
         }
     }
 }
