@@ -47,6 +47,22 @@ const DetalleConteoTable: React.FC = () => {
         return String(date);
     };
 
+    // ── Validación de fecha de vencimiento ─────────────────────────────────────
+    // Los medicamentos no pueden estar ya vencidos ni expirar en más de 15 años.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const maxDate = new Date(today);
+    maxDate.setFullYear(maxDate.getFullYear() + 15);
+
+    const fechaMinStr = today.toISOString().split('T')[0];           // "YYYY-MM-DD"
+    const fechaMaxStr = maxDate.toISOString().split('T')[0];
+
+    const isFechaVencimientoValida = (fecha: string): boolean => {
+        if (!fecha) return false;
+        const d = new Date(fecha + 'T00:00:00');   // forzar hora local, no UTC
+        return d >= today && d <= maxDate;
+    };
+
     const fetchData = async () => {
         if (fetchingRef.current) return;
         fetchingRef.current = true;
@@ -215,13 +231,36 @@ const DetalleConteoTable: React.FC = () => {
             return;
         }
 
-        // VALIDACIÓN: Verificar que todos tengan Lote y Fecha
+        // VALIDACIÓN 1: Lote y fecha presentes
         const incomplete = toSave.some(d => !d.inputLote?.trim() || !d.inputFechaVencimiento);
         if (incomplete) {
             Swal.fire({
                 icon: 'warning',
                 title: 'Campos incompletos',
                 text: 'Debes ingresar el Lote y la Fecha de Vencimiento para todos los medicamentos que vas a reportar.',
+                confirmButtonColor: '#f6952c'
+            });
+            return;
+        }
+
+        // VALIDACIÓN 2: Fecha de vencimiento en rango válido (hoy → +15 años)
+        const conFechaInvalida = toSave.filter(d => !isFechaVencimientoValida(d.inputFechaVencimiento));
+        if (conFechaInvalida.length > 0) {
+            const nombres = conFechaInvalida
+                .map(d => d.medicamento?.descripcion || `ID ${d.idMedicamento}`)
+                .join('\n• ');
+            Swal.fire({
+                icon: 'error',
+                title: 'Fecha de vencimiento inválida',
+                html: `
+                    <p class="text-sm text-gray-600 mb-3">
+                        La fecha debe estar entre <strong>hoy</strong> y
+                        <strong>15 años en el futuro</strong>.<br/>
+                        Revisa los siguientes medicamentos:
+                    </p>
+                    <div class="text-left bg-red-50 rounded-xl p-3 text-xs font-bold text-red-700 max-h-40 overflow-y-auto">
+                        • ${nombres.replace(/\n/g, '<br/>• ')}
+                    </div>`,
                 confirmButtonColor: '#f6952c'
             });
             return;
@@ -423,7 +462,13 @@ const DetalleConteoTable: React.FC = () => {
                                     <td className="px-4 py-8">
                                         <input
                                             type="text"
-                                            className={`w-full text-center py-4 rounded-xl border-2 border-transparent outline-none font-bold text-xs shadow-inner transition-all placeholder:text-gray-300 ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-gray-600'}`}
+                                            min={fechaMinStr}
+                                            max={fechaMaxStr}
+                                            className={`w-full text-center py-4 rounded-xl border-2 outline-none font-bold text-xs shadow-inner transition-all placeholder:text-gray-300
+                                                ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed border-transparent' :
+                                                  d.inputFechaVencimiento && !isFechaVencimientoValida(d.inputFechaVencimiento)
+                                                    ? 'bg-red-50 border-red-400 text-red-600'
+                                                    : 'bg-gray-50 border-transparent focus:border-orange-500 text-gray-600'}`}
                                             placeholder="AAAA-MM-DD"
                                             value={d.inputFechaVencimiento}
                                             onChange={(e) => handleFechaVencimientoChange(d.id || d.tempId!, e.target.value)}
@@ -431,6 +476,11 @@ const DetalleConteoTable: React.FC = () => {
                                             onBlur={(e) => { if (!e.target.value) e.target.type = 'text' }}
                                             disabled={loading}
                                         />
+                                        {d.inputFechaVencimiento && !isFechaVencimientoValida(d.inputFechaVencimiento) && (
+                                            <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mt-1 text-center">
+                                                {new Date(d.inputFechaVencimiento + 'T00:00:00') < today ? '⚠ Fecha vencida' : '⚠ Máx. 15 años'}
+                                            </p>
+                                        )}
                                     </td>
                                     <td className="px-8 py-8">
                                         {d.cantidadContada !== null ? (
@@ -525,7 +575,13 @@ const DetalleConteoTable: React.FC = () => {
                                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block text-center">Vencimiento</label>
                                     <input
                                         type="text"
-                                        className={`w-full py-3 border-2 border-transparent rounded-xl text-center font-bold text-sm outline-none transition-all shadow-inner placeholder:text-gray-300 ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-50 focus:border-orange-500 text-gray-600'}`}
+                                        min={fechaMinStr}
+                                        max={fechaMaxStr}
+                                        className={`w-full py-3 border-2 rounded-xl text-center font-bold text-sm outline-none transition-all shadow-inner placeholder:text-gray-300
+                                            ${loading ? 'bg-gray-200 text-gray-400 cursor-not-allowed border-transparent' :
+                                              d.inputFechaVencimiento && !isFechaVencimientoValida(d.inputFechaVencimiento)
+                                                ? 'bg-red-50 border-red-400 text-red-600'
+                                                : 'bg-gray-50 border-transparent focus:border-orange-500 text-gray-600'}`}
                                         placeholder="AAAA-MM-DD"
                                         value={d.inputFechaVencimiento}
                                         onChange={(e) => handleFechaVencimientoChange(d.id || d.tempId!, e.target.value)}
@@ -533,6 +589,11 @@ const DetalleConteoTable: React.FC = () => {
                                         onBlur={(e) => { if (!e.target.value) e.target.type = 'text' }}
                                         disabled={loading}
                                     />
+                                    {d.inputFechaVencimiento && !isFechaVencimientoValida(d.inputFechaVencimiento) && (
+                                        <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mt-1 text-center">
+                                            {new Date(d.inputFechaVencimiento + 'T00:00:00') < today ? '⚠ Fecha vencida' : '⚠ Máx. 15 años'}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                             <div className="pt-2">
