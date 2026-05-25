@@ -525,20 +525,34 @@ public class MedicamentoService {
     // ESTADOS DE CONTEO
     // ═══════════════════════════════════════════════════════════════════════════
 
-    @org.springframework.transaction.annotation.Transactional
+    /**
+     * REQUIRES_NEW: corre en su propia transacción independiente.
+     *
+     * Razón: saveAllDetalles() tiene @Transactional y llama a este método dentro
+     * de un try-catch por ítem. Si usara REQUIRED (propagación por defecto),
+     * al lanzar una excepción aquí Spring marcaría la transacción externa como
+     * "rollback-only". Aunque saveAllDetalles atrapa la excepción, al intentar
+     * hacer commit al final Spring lanza UnexpectedRollbackException → HTTP 500.
+     * Con REQUIRES_NEW cada llamada tiene su propia transacción; un fallo aquí
+     * solo afecta a ese ítem y no envenena la transacción del llamador.
+     */
+    @org.springframework.transaction.annotation.Transactional(
+        propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void marcarComoContado(Integer idMed, Double cantidadReal) {
         if (idMed == null) return;
-        Medicamento med = medicamentoRepository.findById(java.util.Objects.requireNonNull(idMed))
-                .orElseThrow(() -> new RuntimeException("Medicamento no encontrado"));
-        if ("A".equals(med.getTipomolecula())) {
-            if (med.getEstadoConteoMensual() < 2) med.setEstadoConteoMensual(med.getEstadoConteoMensual() + 1);
-        } else {
-            med.setEstadoConteoMensual(1);
-        }
-        med.setInventario(cantidadReal.intValue());
-        med.setEstadoDelConteo("SÍ");
-        med.setFechaUltimoConteo(java.time.LocalDateTime.now());
-        medicamentoRepository.save(med);
+        // ifPresent: si el medicamento no existe simplemente se ignora en lugar
+        // de lanzar RuntimeException que envenenaba la transacción exterior.
+        medicamentoRepository.findById(idMed).ifPresent(med -> {
+            if ("A".equals(med.getTipomolecula())) {
+                if (med.getEstadoConteoMensual() < 2) med.setEstadoConteoMensual(med.getEstadoConteoMensual() + 1);
+            } else {
+                med.setEstadoConteoMensual(1);
+            }
+            med.setInventario(cantidadReal.intValue());
+            med.setEstadoDelConteo("SÍ");
+            med.setFechaUltimoConteo(java.time.LocalDateTime.now());
+            medicamentoRepository.save(med);
+        });
     }
 
     @org.springframework.transaction.annotation.Transactional
