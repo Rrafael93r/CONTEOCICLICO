@@ -48,19 +48,22 @@ const DetalleConteoTable: React.FC = () => {
     };
 
     // ── Validación de fecha de vencimiento ─────────────────────────────────────
-    // Los medicamentos no pueden estar ya vencidos ni expirar en más de 15 años.
+    // Rango permitido: 3 años atrás (medicamentos ya vencidos que igual se
+    // deben registrar en el conteo) hasta 15 años adelante.
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const minDate = new Date(today);
+    minDate.setFullYear(minDate.getFullYear() - 3);
     const maxDate = new Date(today);
     maxDate.setFullYear(maxDate.getFullYear() + 15);
 
-    const fechaMinStr = today.toISOString().split('T')[0];           // "YYYY-MM-DD"
+    const fechaMinStr = minDate.toISOString().split('T')[0];         // "YYYY-MM-DD"
     const fechaMaxStr = maxDate.toISOString().split('T')[0];
 
     const isFechaVencimientoValida = (fecha: string): boolean => {
         if (!fecha) return false;
         const d = new Date(fecha + 'T00:00:00');   // forzar hora local, no UTC
-        return d >= today && d <= maxDate;
+        return d >= minDate && d <= maxDate;
     };
 
     const fetchData = async () => {
@@ -254,7 +257,7 @@ const DetalleConteoTable: React.FC = () => {
                 title: 'Fecha de vencimiento inválida',
                 html: `
                     <p class="text-sm text-gray-600 mb-3">
-                        La fecha debe estar entre <strong>hoy</strong> y
+                        La fecha debe estar entre <strong>3 años atrás</strong> y
                         <strong>15 años en el futuro</strong>.<br/>
                         Revisa los siguientes medicamentos:
                     </p>
@@ -478,7 +481,7 @@ const DetalleConteoTable: React.FC = () => {
                                         />
                                         {d.inputFechaVencimiento && !isFechaVencimientoValida(d.inputFechaVencimiento) && (
                                             <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mt-1 text-center">
-                                                {new Date(d.inputFechaVencimiento + 'T00:00:00') < today ? '⚠ Fecha vencida' : '⚠ Máx. 15 años'}
+                                                {new Date(d.inputFechaVencimiento + 'T00:00:00') < minDate ? '⚠ Máx. 3 años atrás' : '⚠ Máx. 15 años'}
                                             </p>
                                         )}
                                     </td>
@@ -591,7 +594,7 @@ const DetalleConteoTable: React.FC = () => {
                                     />
                                     {d.inputFechaVencimiento && !isFechaVencimientoValida(d.inputFechaVencimiento) && (
                                         <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mt-1 text-center">
-                                            {new Date(d.inputFechaVencimiento + 'T00:00:00') < today ? '⚠ Fecha vencida' : '⚠ Máx. 15 años'}
+                                            {new Date(d.inputFechaVencimiento + 'T00:00:00') < minDate ? '⚠ Máx. 3 años atrás' : '⚠ Máx. 15 años'}
                                         </p>
                                     )}
                                 </div>
