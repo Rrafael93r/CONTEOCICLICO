@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { getAllMedicamentos, updateMedicamento, Medicamento, resetCycleByUsuario, bulkUpdateMedicamentoStatus, getDashboardStats } from '../../servicios/medicamentoService';
 import { createDetalle, getAllDetalles, updateDetalle, DetalleConteo, bulkCreateDetalles, bulkUpdateDetalles } from '../../servicios/detalleConteoService';
 import { getAllPersonalizados } from '../../servicios/personalizadoService';
@@ -325,15 +325,19 @@ const DetalleConteoTable: React.FC = () => {
         }
     };
 
-    const filteredDetalles = detalles.filter(d => {
-        const now = new Date();
-        const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
-
-        return normalizeDate(d.fechaRegistro) === today && d.cantidadContada === null && (
+    // useMemo evita recalcular y reordenar la lista en cada render,
+    // lo que puede desincronizar el DOM virtual de React con el real
+    // y causar errores insertBefore cuando hay extensiones de navegador
+    // o actualizaciones concurrentes del estado.
+    const todayStr = fechaMinStr.slice(0, 10); // reutilizamos la fecha ya calculada
+    const filteredDetalles = useMemo(() => detalles.filter(d =>
+        normalizeDate(d.fechaRegistro) === todayStr &&
+        d.cantidadContada === null && (
             (d.medicamento?.descripcion.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
             (d.medicamento?.plu || '').includes(searchTerm)
-        );
-    });
+        )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    ), [detalles, searchTerm]);
 
     if (loading && detalles.length === 0) return (
         <div className="p-20 text-center">
@@ -415,7 +419,7 @@ const DetalleConteoTable: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                             {filteredDetalles.map((d) => (
-                                <tr key={d.id ? d.id : d.tempId} className="hover:bg-gray-50/30 transition-colors group">
+                                <tr key={d.isNew ? d.tempId : `db-${d.id}`} className="hover:bg-gray-50/30 transition-colors group">
                                     <td className="px-8 py-8">
                                         <div className="flex items-center gap-5">
                                             <div className="w-12 h-12 bg-white rounded-2xl shadow-sm border border-orange-100 flex items-center justify-center text-orange-500 font-black group-hover:bg-orange-500 group-hover:text-white transition-all transform group-hover:rotate-6">
@@ -516,7 +520,7 @@ const DetalleConteoTable: React.FC = () => {
             {/* Vista Móvil (Tarjetas) */}
             <div className="lg:hidden space-y-4">
                 {filteredDetalles.map((d) => (
-                    <div key={d.id ? d.id : d.tempId} className={`bg-white rounded-3xl p-4 shadow-sm border-2 transition-all ${d.cantidadContada !== null ? 'border-green-100' : 'border-transparent active:scale-[0.98]'}`}>
+                    <div key={d.isNew ? d.tempId : `db-${d.id}`} className={`bg-white rounded-3xl p-4 shadow-sm border-2 transition-all ${d.cantidadContada !== null ? 'border-green-100' : 'border-transparent active:scale-[0.98]'}`}>
                         <div className="flex justify-between items-start mb-4">
                             <div className="flex-1">
                                 <h4 className="text-base font-black text-gray-900 leading-tight mb-2 uppercase">{d.medicamento?.descripcion}</h4>
