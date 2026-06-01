@@ -325,11 +325,15 @@ const DetalleConteoTable: React.FC = () => {
         }
     };
 
+    // todayStr: fecha de HOY en formato YYYY-MM-DD para filtrar detalles del día.
+    // IMPORTANTE: NO usar fechaMinStr aquí — esa variable apunta a (hoy - 3 años),
+    // que es el mínimo permitido para fechas de vencimiento, no la fecha actual.
+    const todayStr = today.toISOString().split('T')[0];
+
     // useMemo evita recalcular y reordenar la lista en cada render,
     // lo que puede desincronizar el DOM virtual de React con el real
     // y causar errores insertBefore cuando hay extensiones de navegador
     // o actualizaciones concurrentes del estado.
-    const todayStr = fechaMinStr.slice(0, 10); // reutilizamos la fecha ya calculada
     const filteredDetalles = useMemo(() => detalles.filter(d =>
         normalizeDate(d.fechaRegistro) === todayStr &&
         d.cantidadContada === null && (
